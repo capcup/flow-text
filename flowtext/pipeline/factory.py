@@ -29,10 +29,10 @@ def _available(module: str) -> bool:
     Wichtig, damit ein fehlendes Extra beim *Start* auffällt und nicht erst
     beim ersten Diktat — die schweren Importe passieren sonst erst dort.
     """
-    if module in sys.modules:
-        # Schon geladen. ``find_spec`` würde hier für Module ohne ``__spec__``
-        # ein ValueError werfen, obwohl das Modul offensichtlich da ist.
+    if sys.modules.get(module) is not None:
         return True
+    if module in sys.modules and sys.modules[module] is None:
+        return False
     try:
         return importlib.util.find_spec(module) is not None
     except (ImportError, ValueError):

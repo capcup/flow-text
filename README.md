@@ -2,7 +2,7 @@
 
 Lokale Voice-to-Text-Engine für macOS (Apple Silicon). 100 % offline — keine Daten verlassen den Mac.
 
-**Status:** v1.3 — vollständig: Hotkey → Aufnahme → Whisper → optionale LLM-Korrektur →
+**Status:** v1.4 — vollständig: Hotkey → Aufnahme → Whisper → optionale LLM-Korrektur →
 Text in die aktive App.
 
 ---
@@ -20,6 +20,29 @@ python -m flowtext            # 2. starten
 
 Beim ersten Start lädt Whisper sein Modell herunter (~1,5 GB für
 `large-v3-turbo`). Das passiert einmalig und im Warmup, nicht beim ersten Diktat.
+
+
+### Als Menüleisten-App
+
+```bash
+pip install 'rumps>=0.4.0'
+python -m flowtext --menubar     # oder: flowtext-menubar
+```
+
+Statt Terminal-Log bekommst du ein Icon in der Menüleiste, das den Zustand zeigt:
+
+| Icon | Bedeutung |
+| :---: | :--- |
+| 🎙 | bereit |
+| 🔴 | nimmt auf |
+| ⏳ | transkribiert |
+| ⏸ | pausiert |
+| ⚠️ | Fehler — ins Log schauen |
+
+Im Menü: pausieren/fortsetzen, `config.toml` öffnen, Logdatei öffnen, beenden.
+
+Die Berechtigungen hängen weiterhin an der startenden App (Terminal), weil dies noch
+kein eigenständiges `.app`-Bundle ist. Das kommt in einer späteren Stufe.
 
 **Auslöser:** Command-Taste **zweimal antippen** (links oder rechts) — einmal zum Starten,
 einmal zum Stoppen der Aufnahme.
@@ -161,6 +184,7 @@ flowtext/
 ├── config.py         Dataclasses + TOML, Validierung, Shortcut-Konflikte
 ├── permissions.py    AXIsProcessTrusted + IOHIDCheckAccess, verantwortliche App
 ├── diagnostics.py    Umgebung, Berechtigungen, Mikrofon, Tastatur
+├── menubar.py        Statusicon (rumps), optional
 ├── state.py          State-Enum, StateMachine mit Observern
 ├── feedback.py       Systemsounds
 ├── hotkey/
@@ -187,12 +211,12 @@ flowtext/
 ## Entwicklung
 
 ```bash
-pytest                  # 153 Tests, laufen ohne macOS
+pytest                  # 173 Tests, laufen ohne macOS
 ruff check . && ruff format --check .
 mypy                    # strict, Zielplattform darwin
 ```
 
-Die Tests kommen ohne mlx-whisper, Ollama und pyperclip aus: sie schieben
+Die Tests kommen ohne mlx-whisper, Ollama, pyperclip und rumps aus: sie schieben
 Fake-Module in `sys.modules` und prüfen damit die Logik statt der Fremdbibliothek.
 
 Fehlt ein Extra zur Laufzeit, fällt das beim **Start** auf (die Factory prüft mit

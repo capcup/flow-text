@@ -32,6 +32,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--combo", help="Kombination, z. B. '<ctrl>+<shift>+d'")
     parser.add_argument("--tap-key", help="Taste für Doppel-Tap, z. B. cmd_r")
     parser.add_argument(
+        "--menubar",
+        action="store_true",
+        help="Als Menüleisten-App starten (Statusicon statt Terminal-Log)",
+    )
+    parser.add_argument(
         "--watch-keys",
         action="store_true",
         help="Tastaturereignisse live anzeigen statt aufzunehmen (Diagnose)",
@@ -120,11 +125,30 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
 
+    if args.menubar:
+        from . import menubar
+
+        if not menubar.available():
+            sys.stderr.write(
+                "Die Menüleisten-Variante braucht rumps.\n"
+                "Installation: pip install 'flowtext[menubar]'\n"
+                "Oder ohne Icon starten: python -m flowtext\n"
+            )
+            return 2
+        # rumps übernimmt den Hauptthread; app.start() läuft daneben.
+        menubar.MenubarApp(cfg, app).run()
+        return 0
+
     try:
         app.run()
     except KeyboardInterrupt:
         app.request_stop()
     return 0
+
+
+def menubar_entry(argv: list[str] | None = None) -> int:
+    """Einstiegspunkt ``flowtext-menubar`` — wie ``main`` mit ``--menubar``."""
+    return main([*(argv or sys.argv[1:]), "--menubar"])
 
 
 if __name__ == "__main__":

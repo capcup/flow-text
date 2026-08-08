@@ -159,17 +159,20 @@ def process_chain(max_depth: int = 12) -> list[tuple[int, str]]:
                 text=True,
                 timeout=2.0,
             )
+            line = result.stdout.strip()
+            if not line or result.returncode != 0:
+                break
+            ppid_text, _, command = line.partition(" ")
+            chain.append((pid, command.strip()))
+            try:
+                pid = int(ppid_text)
+            except ValueError:
+                break
         except (OSError, subprocess.SubprocessError):
             break
-        line = result.stdout.strip()
-        if not line:
-            break
-        ppid_text, _, command = line.partition(" ")
-        chain.append((pid, command.strip()))
-        try:
-            pid = int(ppid_text)
-        except ValueError:
-            break
+
+    if not chain:
+        chain.append((os.getpid(), sys.executable))
     return chain
 
 

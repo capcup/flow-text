@@ -55,11 +55,19 @@ class FlowTextApp:
 
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._paused = False
 
     # ------------------------------------------------------------------ API
 
-    def run(self) -> None:
-        """Startet alle Threads und blockiert bis zum Stopp."""
+    def start(self) -> None:
+        """Startet alle Threads und kehrt sofort zurück.
+
+        Getrennt von :meth:`run`, weil die Menüleisten-Variante den
+        Hauptthread für Cocoa braucht und nicht blockiert werden darf.
+        """
+        if self._threads:
+            raise RuntimeError("FlowText läuft bereits")
+
         self._cleanup_temp()
         self.pipeline.warmup()
 
@@ -70,8 +78,12 @@ class FlowTextApp:
         for thread in self._threads:
             thread.start()
         self.hotkey.start()
+        log.info("FlowText läuft. Auslöser: %s.", self.hotkey.describe())
 
-        log.info("FlowText läuft. Auslöser: %s. Beenden mit Ctrl+C.", self.hotkey.describe())
+    def run(self) -> None:
+        """Startet alles und blockiert bis zum Stopp (CLI-Variante)."""
+        self.start()
+        log.info("Beenden mit Ctrl+C.")
         try:
             while not self._stop.wait(0.5):
                 pass
@@ -81,6 +93,28 @@ class FlowTextApp:
     def request_stop(self) -> None:
         """Signalsicher: setzt nur ein Event, kein Logging, keine I/O."""
         self._stop.set()
+
+    # ------------------------------------------------------------------ Pause
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    def set_paused(self, value: bool) -> None:
+        """Hält den Auslöser an, ohne den Listener zu beenden.
+
+        Der Event-Tap bleibt bewusst aktiv: ihn zu stoppen und neu zu starten
+        wäre der riskantere Weg (Berechtigungen, Tap-Neuaufbau). Es werden
+        lediglich die Auslöser verworfen.
+        """
+        if value == self._paused:
+            return
+        self._paused = value
+        if value and self.state.current is State.RECORDING:
+            self.recorder.abort()
+            self.state.transition(State.IDLE)
+            log.info("Laufende Aufnahme wegen Pause verworfen.")
+        log.info("FlowText %s.", "pausiert" if value else "wieder aktiv")
 
     def shutdown(self) -> None:
         if not self._stop.is_set():
@@ -114,6 +148,9 @@ class FlowTextApp:
                     self._to_error()
 
     def _on_trigger(self) -> None:
+        if self._paused:
+            log.debug("Auslöser ignoriert — FlowText ist pausiert.")
+            return
         current = self.state.current
         if current is State.IDLE:
             self._begin_recording()

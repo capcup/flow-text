@@ -37,9 +37,10 @@ class TestFactory:
         assert isinstance(pipe.refiner, NullRefiner)
         assert isinstance(pipe.injector, LogInjector)
 
-    def test_missing_extras_degrade_visibly(self, caplog) -> None:
+    def test_missing_extras_degrade_visibly(self, caplog, monkeypatch) -> None:
         """Fehlt mlx-whisper, muss das beim START auffallen — nicht erst
         beim ersten Diktat, wenn der Import tief in der Stufe passiert."""
+        monkeypatch.setitem(sys.modules, "pyperclip", None)
         cfg = PipelineConfig(transcriber="mlx", refiner="ollama", injector="clipboard")
         with caplog.at_level("ERROR", logger="flowtext.pipeline.factory"):
             pipe = build_pipeline(cfg)

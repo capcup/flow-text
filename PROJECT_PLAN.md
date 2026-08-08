@@ -90,8 +90,8 @@
       inkl. Sichern und Wiederherstellen der Zwischenablage
 - [x] Akustische System-Benachrichtigungen (Systemsounds via `afplay`)
 
-### Version 1.3 - UX & Performance Refinements
-- [ ] Menüleisten-App via `rumps` mit Statusicon
+### Version 1.4 - UX & Performance Refinements
+- [x] Menüleisten-App via `rumps` mit Statusicon, Pause und Schnellzugriffen
 - [ ] Push-to-Talk als Alternative zum Toggle
 - [ ] Stream-/Chunk-basiertes Buffer-Management
 - [ ] Dynamic Whisper Model Selection (`tiny`, `base`, `small`, `large-v3-turbo`)
