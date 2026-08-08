@@ -63,6 +63,8 @@ class FakePipeline:
 
     def warmup(self) -> None: ...
 
+    def shutdown(self) -> None: ...
+
     def run(self, path: Path) -> str:
         self.runs.append(path)
         return "text"

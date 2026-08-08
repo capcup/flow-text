@@ -82,10 +82,12 @@
 - [x] Event-Watchdog + `--watch-keys`: fehlende Berechtigungen melden sich selbst
 - [x] Diagnose zentral in `flowtext/diagnostics.py`, benennt die freizugebende App
 
-### Version 1.2 (MVP Step 2) - Next Iteration
-- [ ] Integration von `mlx-whisper` (Inferenz auf der temporären WAV-Datei)
-- [ ] Anbindung der local `ollama` Python-Library zur Text-Formatierung
-- [ ] Text-Injektion in das aktive Fenster via `pyperclip` + `pyautogui` (`Cmd+V`)
+### Version 1.3 (MVP Step 2) - Abgeschlossen
+- [x] Integration von `mlx-whisper` (Modell im Warmup laden, feste Sprache)
+- [x] Anbindung der lokalen `ollama`-Library zur Text-Formatierung
+      (Erreichbarkeitsprüfung beim Start, Fallback auf das Rohtranskript)
+- [x] Text-Injektion in das aktive Fenster via `pyperclip` + `pynput` (`Cmd+V`),
+      inkl. Sichern und Wiederherstellen der Zwischenablage
 - [x] Akustische System-Benachrichtigungen (Systemsounds via `afplay`)
 
 ### Version 1.3 - UX & Performance Refinements

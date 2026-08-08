@@ -37,9 +37,11 @@
 > | F9–F13, A1–A7, B1–B8 | ✅ | siehe Commits `v1.1` und `v1.2` |
 > | Fremd-Shortcut (Claude, macOS) | ✅ | `config.RESERVED_TAP_KEYS`, Warnung beim Start |
 > | Stille bei fehlender Berechtigung | ✅ | `responsible_app()`, `--watch-keys`, Event-Watchdog |
-> | Phase 4 (mlx-whisper, Ollama, Injektion) | ⬜ | offen — Pipeline ist als Stub eingehängt |
+> | Phase 4 (mlx-whisper, Ollama, Injektion) | ✅ | `pipeline/transcribe_mlx.py`, `refine_ollama.py`, `inject_macos.py` |
 >
-> Nächster Schritt: Phase 4 — siehe [§6](#6-umsetzungsplan-mit-akzeptanzkriterien).
+> Damit ist der Plan aus §6 vollständig abgearbeitet. Offen bleibt nur noch
+> [§9](#9-roadmap-v11--v20): Menüleisten-App, Push-to-Talk, Streaming-Transkription
+> und das signierte `.app`-Bundle.
 
 ---
 

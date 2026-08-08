@@ -32,19 +32,27 @@ min_seconds = 0.3          # kürzere Aufnahmen gelten als Fehlbedienung
 delete_after_use = true
 
 [pipeline]
-# Derzeit ist nur der Stub-Betrieb implementiert: die Aufnahme wird
-# protokolliert, aber nicht transkribiert. Die Werte "mlx", "ollama" und
-# "clipboard" folgen in v1.2 und werden bis dahin beim Start mit einem
-# Hinweis abgelehnt — statt still auf den Stub zurückzufallen.
-transcriber = "stub"          # v1.2: "mlx"
-refiner = "none"              # v1.2: "ollama"
-injector = "none"             # v1.2: "clipboard"
-
-# Schon vorbereitet, aber erst ab v1.2 wirksam:
+# "mlx" = mlx-whisper (Apple Silicon), "stub" = nur protokollieren.
+transcriber = "mlx"
 whisper_model = "mlx-community/whisper-large-v3-turbo"
+
+# Feste Sprache statt Auto-Erkennung: schneller und zuverlässiger. Bei
+# kurzen Diktaten hält Whisper "Danke." sonst gern für Englisch.
 language = "de"
+
+# "ollama" korrigiert Interpunktion und Groß-/Kleinschreibung, "none" ist aus.
+# Braucht ein laufendes "ollama serve" und ein gezogenes Modell:
+#   ollama pull qwen2.5:7b
+# Ist Ollama nicht erreichbar, wird das Rohtranskript durchgereicht.
+refiner = "none"
 ollama_model = "qwen2.5:7b"
 ollama_timeout = 20.0
+
+# "clipboard" legt den Text in die Zwischenablage und fügt ihn ein,
+# "none" schreibt ihn nur ins Log.
+injector = "clipboard"
+paste = true                    # false = nur kopieren, von Hand einfügen
+restore_clipboard_after = 1.0   # 0 = Transkript in der Zwischenablage lassen
 
 [feedback]
 sound = true

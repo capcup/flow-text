@@ -92,25 +92,3 @@ def test_warmup_is_called() -> None:
     transcriber = FakeTranscriber()
     Pipeline(transcriber).warmup()
     assert transcriber.warmed
-
-
-class TestFactory:
-    def test_builds_stub_pipeline_from_defaults(self) -> None:
-        from flowtext.config import PipelineConfig
-        from flowtext.pipeline.factory import build_pipeline
-        from flowtext.pipeline.stub import LogInjector, NullRefiner, StubTranscriber
-
-        pipe = build_pipeline(PipelineConfig())
-        assert isinstance(pipe.transcriber, StubTranscriber)
-        assert isinstance(pipe.refiner, NullRefiner)
-        assert isinstance(pipe.injector, LogInjector)
-
-    def test_stub_pipeline_runs_without_error(self, tmp_path: Path) -> None:
-        from flowtext.config import PipelineConfig
-        from flowtext.pipeline.factory import build_pipeline
-
-        audio = tmp_path / "a.wav"
-        audio.write_bytes(b"RIFF")
-        pipe = build_pipeline(PipelineConfig())
-        pipe.warmup()
-        assert pipe.run(audio) == ""

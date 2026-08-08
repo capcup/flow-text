@@ -86,28 +86,23 @@ class AudioConfig:
     delete_after_use: bool = True
 
 
-#: Bereits implementierte Pipeline-Stufen. Die restlichen Werte sind für v1.2
-#: vorgesehen und werden beim Start mit einem Hinweis abgelehnt, statt
-#: stillschweigend auf den Stub zurückzufallen.
-IMPLEMENTED_TRANSCRIBERS = frozenset({"stub"})
-IMPLEMENTED_REFINERS = frozenset({"none"})
-IMPLEMENTED_INJECTORS = frozenset({"none"})
-
-_PLANNED = {
-    "transcriber": {"mlx": "mlx-whisper"},
-    "refiner": {"ollama": "Ollama-Nachbearbeitung"},
-    "injector": {"clipboard": "Clipboard + Cmd+V"},
-}
+#: Verfügbare Pipeline-Stufen.
+IMPLEMENTED_TRANSCRIBERS = frozenset({"stub", "mlx"})
+IMPLEMENTED_REFINERS = frozenset({"none", "ollama"})
+IMPLEMENTED_INJECTORS = frozenset({"none", "clipboard"})
 
 
 @dataclass
 class PipelineConfig:
-    #: Derzeit nur ``"stub"``. ``"mlx"`` folgt in v1.2.
-    transcriber: str = "stub"
+    #: ``"mlx"`` (mlx-whisper) oder ``"stub"`` (nur protokollieren).
+    transcriber: str = "mlx"
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
+
+    #: Feste Sprache statt Auto-Erkennung — schneller und zuverlässiger.
     language: str = "de"
 
-    #: Derzeit nur ``"none"``. ``"ollama"`` folgt in v1.2.
+    #: ``"ollama"`` oder ``"none"``. Braucht ein laufendes ``ollama serve``;
+    #: ist es nicht erreichbar, wird das Rohtranskript durchgereicht.
     refiner: str = "none"
     ollama_model: str = "qwen2.5:7b"
     ollama_timeout: float = 20.0
@@ -117,8 +112,15 @@ class PipelineConfig:
         "Ändere NICHT den Inhalt und antworte NUR mit dem korrigierten Text."
     )
 
-    #: Derzeit nur ``"none"``. ``"clipboard"`` folgt in v1.2.
-    injector: str = "none"
+    #: ``"clipboard"`` (Zwischenablage + Cmd+V) oder ``"none"`` (nur Log).
+    injector: str = "clipboard"
+
+    #: ``False`` = Text nur in die Zwischenablage legen, nicht einfügen.
+    paste: bool = True
+
+    #: Sekunden, nach denen der vorherige Inhalt der Zwischenablage
+    #: zurückkommt. ``0`` lässt das Transkript liegen.
+    restore_clipboard_after: float = 1.0
 
 
 @dataclass
@@ -242,18 +244,11 @@ def validate(cfg: Config) -> None:
         ("injector", IMPLEMENTED_INJECTORS),
     ):
         value = getattr(cfg.pipeline, field_name)
-        if value in implemented:
-            continue
-        planned = _PLANNED[field_name].get(value)
-        detail = (
-            f"ist für v1.2 geplant ({planned}) und noch nicht implementiert"
-            if planned
-            else "ist unbekannt"
-        )
-        raise ConfigError(
-            f"pipeline.{field_name} = {value!r} {detail}. "
-            f"Möglich: {', '.join(sorted(implemented))}."
-        )
+        if value not in implemented:
+            raise ConfigError(
+                f"pipeline.{field_name} = {value!r} ist unbekannt. "
+                f"Möglich: {', '.join(sorted(implemented))}."
+            )
 
 
 def conflicts(cfg: Config) -> list[str]:

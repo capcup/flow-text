@@ -25,10 +25,11 @@ class TranscriptionResult:
 
 @runtime_checkable
 class Transcriber(Protocol):
-    """Audio → Rohtext."""
+    """Audio → Rohtext.
 
-    def warmup(self) -> None:
-        """Modell vorladen. Wird beim Start aufgerufen, nicht beim ersten Hotkey."""
+    Optional: ``warmup()`` zum Vorladen des Modells und ``shutdown()`` zum
+    Aufräumen. :class:`Pipeline` ruft beide auf, wenn sie existieren.
+    """
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult: ...
 
@@ -65,10 +66,35 @@ class Pipeline:
         self.injector = injector
 
     def warmup(self) -> None:
-        try:
-            self.transcriber.warmup()
-        except Exception:
-            log.exception("Warmup der Transkription fehlgeschlagen — erster Lauf wird langsam.")
+        """Bereitet alle Stufen vor: Modell laden, Dienste prüfen.
+
+        Läuft beim Start, damit das erste Diktat nicht auf einen
+        Modell-Download wartet. Ein Fehlschlag darf den Start nie
+        verhindern — die Stufe meldet sich dann zur Laufzeit.
+        """
+        for name, stage in (
+            ("Transkription", self.transcriber),
+            ("Verfeinerung", self.refiner),
+            ("Ausgabe", self.injector),
+        ):
+            warmup = getattr(stage, "warmup", None)
+            if warmup is None:
+                continue
+            try:
+                warmup()
+            except Exception:
+                log.exception("Warmup der Stufe %s fehlgeschlagen.", name)
+
+    def shutdown(self) -> None:
+        """Räumt Stufen auf, die Ressourcen halten (z. B. laufende Timer)."""
+        for stage in (self.transcriber, self.refiner, self.injector):
+            shutdown = getattr(stage, "shutdown", None)
+            if shutdown is None:
+                continue
+            try:
+                shutdown()
+            except Exception:
+                log.debug("Shutdown einer Pipeline-Stufe fehlgeschlagen.", exc_info=True)
 
     def run(self, audio_path: Path) -> str:
         started = time.perf_counter()

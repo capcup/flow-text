@@ -2,8 +2,8 @@
 
 Lokale Voice-to-Text-Engine für macOS (Apple Silicon). 100 % offline — keine Daten verlassen den Mac.
 
-**Status:** v1.2 — Hotkey, Aufnahme und Architektur stehen und laufen stabil. Die
-STT-/LLM-Pipeline ist als Stub eingehängt und wird in der nächsten Iteration aktiviert.
+**Status:** v1.3 — vollständig: Hotkey → Aufnahme → Whisper → optionale LLM-Korrektur →
+Text in die aktive App.
 
 ---
 
@@ -17,6 +17,9 @@ pip install -r requirements.txt
 python tools/diagnose.py      # 1. Berechtigungen und Mikrofon prüfen
 python -m flowtext            # 2. starten
 ```
+
+Beim ersten Start lädt Whisper sein Modell herunter (~1,5 GB für
+`large-v3-turbo`). Das passiert einmalig und im Warmup, nicht beim ersten Diktat.
 
 **Auslöser:** Command-Taste **zweimal antippen** (links oder rechts) — einmal zum Starten,
 einmal zum Stoppen der Aufnahme.
@@ -66,7 +69,40 @@ max_tap_duration = 0.45
 [audio]
 max_seconds = 300.0
 min_seconds = 0.3
+
+[pipeline]
+transcriber = "mlx"       # oder "stub" (nur protokollieren)
+language = "de"           # feste Sprache, keine Auto-Erkennung
+refiner = "none"          # "ollama" für LLM-Korrektur
+injector = "clipboard"    # Zwischenablage + Cmd+V
+paste = true              # false = nur kopieren
 ```
+
+### Whisper-Modell
+
+`whisper_model` bestimmt Tempo und Qualität. Auf einem M4 mit 16 GB:
+
+| Modell | Größe | Wofür |
+| :--- | :--- | :--- |
+| `mlx-community/whisper-large-v3-turbo` | ~1,5 GB | Standard — beste Qualität, schnell genug |
+| `mlx-community/whisper-medium-mlx` | ~1,5 GB | ältere Alternative, langsamer |
+| `mlx-community/whisper-small-mlx` | ~0,5 GB | wenn RAM knapp ist |
+| `mlx-community/whisper-tiny` | ~0,1 GB | zum Testen der Kette |
+
+### LLM-Korrektur (optional)
+
+`refiner = "ollama"` lässt ein lokales Modell Interpunktion, Groß-/Kleinschreibung und
+offensichtliche Erkennungsfehler korrigieren. Voraussetzung:
+
+```bash
+ollama pull qwen2.5:7b
+ollama serve
+```
+
+Ist Ollama nicht erreichbar oder das Modell nicht gezogen, schaltet FlowText die Stufe
+beim Start ab und gibt das Rohtranskript aus — die Korrektur steht nie zwischen dir und
+deinem Text. Antwortet das Modell dreimal länger als das Transkript, wird die Antwort
+verworfen: dann hat es geplaudert statt korrigiert.
 
 Häufige CLI-Overrides:
 
@@ -135,9 +171,12 @@ flowtext/
 │   ├── recorder.py   deadlockfreie Aufnahme
 │   └── devices.py    Geräteabfrage
 └── pipeline/
-    ├── base.py       Protocols + Verdrahtung
-    ├── factory.py    Aufbau aus der Konfiguration
-    └── stub.py       Platzhalter bis v1.2
+    ├── base.py            Protocols + Verdrahtung
+    ├── factory.py         Aufbau aus der Konfiguration
+    ├── transcribe_mlx.py  mlx-whisper
+    ├── refine_ollama.py   LLM-Korrektur
+    ├── inject_macos.py    Zwischenablage + Cmd+V
+    └── stub.py            Platzhalter für den Trockenlauf
 ```
 
 `tools/diagnose.py` und `--watch-keys` sind beide dünne Aufrufer von
@@ -148,15 +187,17 @@ flowtext/
 ## Entwicklung
 
 ```bash
-pytest                  # 124 Tests, laufen ohne macOS
+pytest                  # 153 Tests, laufen ohne macOS
 ruff check . && ruff format --check .
 mypy                    # strict, Zielplattform darwin
 ```
 
-Die Pipeline läuft derzeit im Stub-Betrieb: die Aufnahme wird protokolliert, aber
-nicht transkribiert. `transcriber = "mlx"`, `refiner = "ollama"` und
-`injector = "clipboard"` folgen in v1.2 und werden bis dahin beim Start mit einem
-Hinweis abgelehnt — statt still auf den Stub zurückzufallen.
+Die Tests kommen ohne mlx-whisper, Ollama und pyperclip aus: sie schieben
+Fake-Module in `sys.modules` und prüfen damit die Logik statt der Fremdbibliothek.
+
+Fehlt ein Extra zur Laufzeit, fällt das beim **Start** auf (die Factory prüft mit
+`find_spec`, bevor sie baut) und nicht erst beim ersten Diktat. FlowText läuft dann
+mit dem Stub weiter und sagt im Log, was fehlt.
 
 Die Trigger-Erkennung arbeitet auf normalisierten Tastennamen und expliziten Zeitstempeln
 statt auf pynput-Objekten — dadurch ist sie ohne Event-Tap testbar. Der `AudioRecorder`
@@ -173,6 +214,10 @@ nimmt eine austauschbare Stream-Fabrik, sodass die Tests ohne PortAudio auskomme
 | Doppel-Tap wird selten erkannt | zu langsam getippt | `double_tap_window` auf `0.6` erhöhen |
 | Funktioniert 1–2×, dann nicht mehr | Event-Tap wurde deaktiviert | Log auf „Hotkey-Callback brauchte … ms" prüfen |
 | Aufnahme startet, Datei ist stumm | Mikrofonberechtigung oder falsches Gerät | `audio.device` in der Konfiguration setzen |
+| Text wird nicht eingefügt, liegt aber in der Ablage | Cmd+V braucht Bedienungshilfen | Freigabe prüfen, oder `paste = false` und von Hand einfügen |
+| Erstes Diktat dauert ewig | Modell wird noch geladen | einmalig; Log zeigt „Whisper-Modell bereit" |
+| Transkript kommt auf Englisch | Auto-Erkennung bei kurzem Diktat | `language = "de"` setzen (Standard) |
+| LLM antwortet statt zu korrigieren | Modell hält den Text für eine Frage | wird automatisch verworfen; ggf. `ollama_prompt` schärfen |
 | Auslöser feuert versehentlich | Doppel-Tap-Fenster zu groß | `double_tap_window` auf 0.25 senken |
 | Auslöser feuert zu selten | Fenster zu klein | `double_tap_window` auf 0.45 erhöhen |
 

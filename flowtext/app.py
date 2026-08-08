@@ -87,6 +87,7 @@ class FlowTextApp:
             self._stop.set()
         self.hotkey.stop()
         self.recorder.abort()
+        self.pipeline.shutdown()
         for thread in self._threads:
             thread.join(timeout=2.0)
         if self.hotkey.dropped_triggers:

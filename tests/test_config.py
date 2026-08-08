@@ -134,31 +134,35 @@ def test_validation_catches_bad_values(mutate) -> None:
 
 
 class TestPipelineValidation:
-    """Nicht implementierte Stufen sollen laut scheitern, nicht still auf den
-    Stub zurückfallen — sonst wundert man sich über leere Transkripte."""
-
     def test_default_pipeline_is_valid(self) -> None:
         validate(Config())
 
+    def test_defaults_use_the_real_stages(self) -> None:
+        """Nach Phase 4 soll FlowText ohne Zutun tatsächlich diktieren."""
+        cfg = Config()
+        assert cfg.pipeline.transcriber == "mlx"
+        assert cfg.pipeline.injector == "clipboard"
+        assert cfg.pipeline.paste is True
+
     @pytest.mark.parametrize(
-        ("field", "value", "hint"),
+        ("field", "value"),
         [
-            ("transcriber", "mlx", "mlx-whisper"),
-            ("refiner", "ollama", "Ollama"),
-            ("injector", "clipboard", "Clipboard"),
+            ("transcriber", "mlx"),
+            ("transcriber", "stub"),
+            ("refiner", "ollama"),
+            ("refiner", "none"),
+            ("injector", "clipboard"),
+            ("injector", "none"),
         ],
     )
-    def test_planned_stages_are_rejected_with_a_hint(
-        self, field: str, value: str, hint: str
-    ) -> None:
+    def test_implemented_stages_are_accepted(self, field: str, value: str) -> None:
         cfg = Config()
         setattr(cfg.pipeline, field, value)
-        with pytest.raises(ConfigError, match=r"v1\.2") as excinfo:
-            validate(cfg)
-        assert hint in str(excinfo.value)
+        validate(cfg)
 
-    def test_unknown_stage_is_rejected(self) -> None:
+    @pytest.mark.parametrize("field", ["transcriber", "refiner", "injector"])
+    def test_unknown_stage_is_rejected(self, field: str) -> None:
         cfg = Config()
-        cfg.pipeline.transcriber = "quatsch"
+        setattr(cfg.pipeline, field, "quatsch")
         with pytest.raises(ConfigError, match="unbekannt"):
             validate(cfg)
