@@ -17,6 +17,7 @@ from flowtext.bundle import (
     BUNDLE_ENV_VAR,
     DEFAULT_BUNDLE_ID,
     LAUNCH_SCRIPT,
+    PYTHON_LINK,
     BundleSpec,
     build,
     codesign,
@@ -93,6 +94,35 @@ class TestLauncherScript:
         """Aus dem Finder gestartet gäbe es sonst keinerlei Ausgabe."""
         assert "launcher.log" in launcher_script(spec, tmp_path / "FlowText.app")
 
+    def test_interpreter_is_started_from_inside_the_bundle(
+        self, spec: BundleSpec, tmp_path: Path
+    ) -> None:
+        """Regression: kein Menüleisten-Icon.
+
+        AppKit bestimmt die Bundle-Identität aus dem Pfad der laufenden
+        ausführbaren Datei. Zeigte launch.sh direkt auf das .venv, lag der
+        Prozess nach dem exec außerhalb der .app — NSStatusBar zeichnete
+        dann nichts.
+        """
+        script = launcher_script(spec, tmp_path / "FlowText.app")
+        assert f'"$(dirname "$0")/{PYTHON_LINK}"' in script
+        assert str(spec.python) not in script
+
+    def test_pythonpath_carries_the_dependencies(self, tmp_path: Path) -> None:
+        """Über den Symlink erkennt Python das .venv nicht mehr selbst."""
+        spec = BundleSpec(
+            python=tmp_path / ".venv" / "bin" / "python3",
+            project=tmp_path,
+            log_dir=tmp_path,
+            site_packages=tmp_path / ".venv" / "lib" / "python3.12" / "site-packages",
+        )
+        script = launcher_script(spec, tmp_path / "FlowText.app")
+        assert "export PYTHONPATH=" in script
+        assert "site-packages" in script
+
+    def test_without_site_packages_no_pythonpath(self, spec: BundleSpec, tmp_path: Path) -> None:
+        assert "PYTHONPATH" not in launcher_script(spec, tmp_path / "FlowText.app")
+
     def test_paths_with_spaces_are_quoted(self, tmp_path: Path) -> None:
         spec = BundleSpec(
             python=tmp_path / "mein venv" / "python3",
@@ -137,8 +167,11 @@ class TestBuild:
     def test_bundle_does_not_copy_the_venv(self, spec: BundleSpec, tmp_path: Path) -> None:
         """Der Kern der Idee: nichts einpacken, nur darauf zeigen."""
         app = build(spec, tmp_path / "dist").app_path
-        files = [p for p in app.rglob("*") if p.is_file()]
-        assert len(files) == 3  # Info.plist + Stub + launch.sh
+        real = [p for p in app.rglob("*") if p.is_file() and not p.is_symlink()]
+        assert len(real) == 3  # Info.plist + Stub + launch.sh
+        link = app / "Contents" / "MacOS" / PYTHON_LINK
+        assert link.is_symlink()
+        assert link.readlink() == spec.python
 
     def test_falls_back_to_the_script_without_a_compiler(
         self, spec: BundleSpec, tmp_path: Path, monkeypatch

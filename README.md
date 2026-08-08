@@ -145,7 +145,7 @@ Once it works, go back to **System Settings → Privacy & Security** and switch 
 permissions **off for your Terminal**. FlowText keeps working — your Terminal no longer
 has access to your keystrokes.
 
-> 💡 **Nothing gets copied.** The app is just three small files pointing at your existing
+> 💡 **Nothing gets copied.** The app is just a few small files pointing at your existing
 > `.venv`. The 2 GB of model data stays where it is, and code changes take effect
 > immediately — no rebuild needed.
 
@@ -159,7 +159,8 @@ FlowText.app/Contents/
 ├── Info.plist        Bundle ID, LSUIElement, microphone reason
 └── MacOS/
     ├── FlowText      tiny native arm64 binary (CFBundleExecutable)
-    └── launch.sh     zsh script → …/.venv/bin/python3 -m flowtext --menubar
+    ├── python3       symlink → your .venv interpreter
+    └── launch.sh     zsh script → ./python3 -m flowtext --menubar
 ```
 
 | Detail | Why it matters |
@@ -169,6 +170,7 @@ FlowText.app/Contents/
 | Ad-hoc signature (`codesign -s -`) | Without a signature, macOS identifies the app by content hash and forgets your permission on every rebuild |
 | **Native binary entry point** | macOS cannot read a CPU architecture from a text file. With a shell script as the entry point it assumes x86_64 and demands Rosetta — launch fails with **error -10669** |
 | Unresolved `.venv` symlink | `.venv/bin/python3` is a symlink to your base interpreter. Resolving it bypasses the virtual environment and no dependency is found |
+| **Interpreter must live inside the bundle** | AppKit derives `[NSBundle mainBundle]` from the running executable's path. Pointing straight at `.venv/bin/python3` puts the process *outside* `FlowText.app` after `exec` — permissions still work, but `NSStatusBar` draws **no menu bar icon**. Hence the `python3` symlink inside `MacOS/`, with dependencies supplied via `PYTHONPATH` |
 
 `tools/make_app.py` handles all of these, and verifies up front that the chosen
 interpreter can actually import FlowText and its dependencies. If you rebuild the app,
@@ -247,7 +249,7 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 
 ## 🧪 Developer Testing & Verification
 
-FlowText comes with a comprehensive test suite of 210 automated tests that run without requiring real microphone input or active macOS GUI permissions:
+FlowText comes with a comprehensive test suite of 214 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
 # Run test suite

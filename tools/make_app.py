@@ -27,6 +27,7 @@ from flowtext.bundle import (
     build,
     codesign,
     next_steps,
+    site_packages_of,
     verify_interpreter,
 )
 from flowtext.config import log_dir
@@ -91,10 +92,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
+    site_packages = site_packages_of(python)
+    print(f"site-packages: {site_packages or 'nicht ermittelbar'}")
+
     spec = BundleSpec(
         python=python,
         project=PROJECT,
         log_dir=log_dir(),
+        site_packages=site_packages,
         bundle_id=args.bundle_id,
     )
 
