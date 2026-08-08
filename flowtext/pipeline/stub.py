@@ -23,7 +23,7 @@ class StubTranscriber:
         size_kb = audio_path.stat().st_size / 1024 if audio_path.exists() else 0.0
         log.info(
             "⚡ Audio bereit für Inferenz: %s (%.1f kB). "
-            'Setze pipeline.transcriber = "mlx" in der config.toml, sobald v1.1 aktiv ist.',
+            'Stub-Modus — für echte Transkription pipeline.transcriber = "mlx" setzen.',
             audio_path,
             size_kb,
         )
