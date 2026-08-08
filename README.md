@@ -1,278 +1,176 @@
-# FlowText
+# ⚡ FlowText — Local Voice-to-Text Engine for macOS
 
-Lokale Voice-to-Text-Engine für macOS (Apple Silicon). 100 % offline — keine Daten verlassen den Mac.
+**FlowText** is an ultra-fast, **100% local voice-to-text dictation application** built specifically for macOS (optimized for Apple Silicon M1/M2/M3/M4 with Unified Memory).
 
-**Status:** v1.4 — vollständig: Hotkey → Aufnahme → Whisper → optionale LLM-Korrektur →
-Text in die aktive App.
+Unlike cloud-based speech-to-text tools, **FlowText runs entirely on your Mac**. No audio data, recordings, or transcribed text ever leave your computer.
 
 ---
 
-## Schnellstart
+## 🌟 Features
+
+* 🔒 **100% Offline & Private**: Zero cloud APIs. Maximum data privacy.
+* 🚀 **Apple Silicon Accelerated**: Uses Apple's `mlx-whisper` framework for fast, GPU/Neural Engine-accelerated transcription.
+* ⌨️ **Double-Tap Hotkey**: Simply double-tap the **`⌘` Command key** (or custom shortcuts) anywhere on macOS to start and stop dictation.
+* 🤖 **Local LLM Text Refinement**: Optional grammar correction and formatting via local `Ollama` models (e.g., `qwen2.5:7b` / `llama3.2`).
+* 📋 **Universal Text Injection**: Automatically pastes transcribed text into whatever text field or application you are currently typing in (`Cmd+V`).
+* 🖥️ **Menu Bar Integration**: Displays live status (Ready, Recording, Processing, Paused) in your macOS menu bar.
+* 🛡️ **Sub-Millisecond Engine**: Non-blocking architecture (< 1ms callback latency) with an automated watchdog that keeps keyboard listeners alive.
+
+---
+
+## 🐣 Beginner's Guide: Step-by-Step Installation
+
+Don't worry if you have never used Terminal, Python, or Homebrew before! Follow these exact steps to get FlowText running on your Mac.
+
+### Step 1: Open Terminal on your Mac
+1. Press `Cmd + Space` on your keyboard to open Spotlight.
+2. Type **Terminal** and press `Enter`. A black or white text window will open.
+
+### Step 2: Ensure Python 3 is installed
+In the Terminal window, paste the following command and press `Enter`:
+```bash
+python3 --version
+```
+* If it prints something like `Python 3.10.x` or `Python 3.12.x`, Python is ready!
+* If macOS asks you to install **Command Line Developer Tools**, click **Install** and follow the on-screen prompts.
+
+### Step 3: Clone the project & setup
+Copy and paste the following commands one line at a time into your Terminal, pressing `Enter` after each line:
 
 ```bash
-cd ~/Desktop/Projects/ai-agents/flow-text
+# 1. Download FlowText into your user directory
+git clone https://github.com/capcup/flow-text.git
+
+# 2. Enter the project folder
+cd flow-text
+
+# 3. Create a isolated Python environment
+python3 -m venv .venv
+
+# 4. Activate the environment
 source .venv/bin/activate
+
+# 5. Install all required dependencies
 pip install -r requirements.txt
-
-python tools/diagnose.py      # 1. Berechtigungen und Mikrofon prüfen
-python -m flowtext            # 2. starten
 ```
-
-Beim ersten Start lädt Whisper sein Modell herunter (~1,5 GB für
-`large-v3-turbo`). Das passiert einmalig und im Warmup, nicht beim ersten Diktat.
-
-
-### Als Menüleisten-App
-
-```bash
-pip install 'rumps>=0.4.0'
-python -m flowtext --menubar     # oder: flowtext-menubar
-```
-
-Statt Terminal-Log bekommst du ein Icon in der Menüleiste, das den Zustand zeigt:
-
-| Icon | Bedeutung |
-| :---: | :--- |
-| 🎙 | bereit |
-| 🔴 | nimmt auf |
-| ⏳ | transkribiert |
-| ⏸ | pausiert |
-| ⚠️ | Fehler — ins Log schauen |
-
-Im Menü: pausieren/fortsetzen, `config.toml` öffnen, Logdatei öffnen, beenden.
-
-Die Berechtigungen hängen weiterhin an der startenden App (Terminal), weil dies noch
-kein eigenständiges `.app`-Bundle ist. Das kommt in einer späteren Stufe.
-
-**Auslöser:** Command-Taste **zweimal antippen** (links oder rechts) — einmal zum Starten,
-einmal zum Stoppen der Aufnahme.
-
-> **Warum nicht Option?** Claude für Mac belegt den Doppel-Tap auf Option bereits systemweit
-> für seine Schnelleingabe. FlowText warnt beim Start, wenn ein bekannt belegter Auslöser
-> konfiguriert ist. Wer Claudes Shortcut abschaltet, kann `tap_key = "alt_r"` verwenden.
 
 ---
 
-## Berechtigungen (der häufigste Stolperstein)
+## 🔒 Step 4: Grant macOS System Permissions (Required!)
 
-FlowText braucht drei Freigaben unter *Systemeinstellungen → Datenschutz & Sicherheit*:
+macOS has strict security settings for reading keyboard shortcuts and accessing the microphone. FlowText requires three permissions in **System Settings**:
 
-| Berechtigung | Wofür |
-| :--- | :--- |
-| **Bedienungshilfen** | globaler Tastatur-Event-Tap |
-| **Eingabeüberwachung** | dito — wird oft vergessen, `AXIsProcessTrusted()` deckt sie **nicht** ab |
-| **Mikrofon** | Audioaufnahme |
+1. Click the **Apple logo ()** in the top-left corner of your screen $\rightarrow$ **System Settings**.
+2. Click **Privacy & Security** in the left sidebar.
+3. Grant the following permissions to your Terminal app (e.g. **Terminal** or **iTerm**):
+   * 🎛️ **Accessibility**: Turn ON the switch for **Terminal**.
+   * 👁️ **Input Monitoring**: Turn ON the switch for **Terminal**.
+   * 🎤 **Microphone**: Turn ON the switch for **Terminal**.
 
-Drei Regeln, die viel Zeit sparen:
-
-1. Die Freigabe gilt der **startenden App** (Terminal.app, iTerm2, VS Code, Cursor) — nicht
-   dem Python-Binary. Ein pyenv- oder venv-Interpreter taucht in der Liste gar nicht auf.
-2. Nach dem Erteilen die App mit **Cmd+Q vollständig beenden** und neu starten. Fenster
-   schließen reicht nicht.
-3. Zum Einrichten **Terminal.app** verwenden. Das integrierte Terminal einer IDE braucht
-   eine eigene Freigabe und verwirrt beim Debuggen.
-
-`python tools/diagnose.py` prüft alles und sagt genau, was fehlt.
+> ⚠️ **CRITICAL STEP:** After toggling these switches, you **MUST completely quit Terminal** by pressing **`Cmd + Q`** while Terminal is open, then re-open Terminal. macOS will not apply keyboard permissions until the terminal app is fully restarted!
 
 ---
 
-## Konfiguration
+## 🎯 Step 5: Test & Run FlowText
 
-`config.toml` im Projektverzeichnis. Persönliche Overrides gehören in `config.local.toml`
-(nicht im Git). Alle Schlüssel sind optional.
+1. Re-open Terminal and enter the project folder:
+   ```bash
+   cd flow-text
+   source .venv/bin/activate
+   ```
+2. **Run the Diagnostic Tool** to verify your permissions and microphone:
+   ```bash
+   python tools/diagnose.py
+   ```
+   * It will display green checkmarks `✅` for Accessibility, Input Monitoring, and Microphone.
+
+3. **Start FlowText**:
+   ```bash
+   python -m flowtext
+   ```
+
+### 🎙️ How to Dictate:
+* **Start Recording:** Double-tap the **`⌘` Command key** (press it twice quickly). You will hear a short sound and see the menu bar icon turn red 🔴.
+* **Speak:** Dictate your text into your microphone.
+* **Stop Recording:** Double-tap the **`⌘` Command key** again. FlowText will transcribe your speech and automatically paste the text into your active app!
+
+---
+
+## ⚙️ Configuration (`config.toml`)
+
+FlowText can be customized by editing the `config.toml` file in the project folder. You can open it in any text editor.
 
 ```toml
 [hotkey]
-mode = "double_tap"       # oder "combo"
-tap_key = "cmd"           # generisch: cmd, shift, ctrl (beide Seiten)
-                          # seitenspezifisch: cmd_r, shift_r, ctrl_r, alt_l
-double_tap_window = 0.50  # großzügig — zu eng fühlt sich an wie "tut nichts"
-max_tap_duration = 0.45
+mode = "double_tap"       # Options: "double_tap" or "combo"
+tap_key = "cmd"           # Options: "cmd", "shift_r", "ctrl_r", "alt_l"
+double_tap_window = 0.40  # Time allowed between two taps (seconds)
+max_tap_duration = 0.35   # Maximum tap hold duration
 
 [audio]
-max_seconds = 300.0
-min_seconds = 0.3
+sample_rate = 16000
+max_seconds = 300.0        # Maximum recording length (5 minutes)
+min_seconds = 0.3          # Recordings shorter than 0.3s are ignored
 
 [pipeline]
-transcriber = "mlx"       # oder "stub" (nur protokollieren)
-language = "de"           # feste Sprache, keine Auto-Erkennung
-refiner = "none"          # "ollama" für LLM-Korrektur
-injector = "clipboard"    # Zwischenablage + Cmd+V
-paste = true              # false = nur kopieren
+transcriber = "mlx"       # Uses mlx-whisper (or "stub" for dry-runs)
+whisper_model = "mlx-community/whisper-large-v3-turbo"
+language = "de"           # Language code ("de", "en", "fr", "es", etc.)
+refiner = "none"          # Set to "ollama" for local LLM grammar correction
+injector = "clipboard"    # Copies text and performs Cmd+V
 ```
 
-### Whisper-Modell
+### Recommended Whisper Models
 
-`whisper_model` bestimmt Tempo und Qualität. Auf einem M4 mit 16 GB:
-
-| Modell | Größe | Wofür |
+| Model Name | Download Size | Best For |
 | :--- | :--- | :--- |
-| `mlx-community/whisper-large-v3-turbo` | ~1,5 GB | Standard — beste Qualität, schnell genug |
-| `mlx-community/whisper-medium-mlx` | ~1,5 GB | ältere Alternative, langsamer |
-| `mlx-community/whisper-small-mlx` | ~0,5 GB | wenn RAM knapp ist |
-| `mlx-community/whisper-tiny` | ~0,1 GB | zum Testen der Kette |
-
-### LLM-Korrektur (optional)
-
-`refiner = "ollama"` lässt ein lokales Modell Interpunktion, Groß-/Kleinschreibung und
-offensichtliche Erkennungsfehler korrigieren. Voraussetzung:
-
-```bash
-ollama pull qwen2.5:7b
-ollama serve
-```
-
-Ist Ollama nicht erreichbar oder das Modell nicht gezogen, schaltet FlowText die Stufe
-beim Start ab und gibt das Rohtranskript aus — die Korrektur steht nie zwischen dir und
-deinem Text. Antwortet das Modell dreimal länger als das Transkript, wird die Antwort
-verworfen: dann hat es geplaudert statt korrigiert.
-
-Häufige CLI-Overrides:
-
-```bash
-python -m flowtext --watch-keys      # Diagnose: kommen überhaupt Events an?
-python -m flowtext --log-level DEBUG # loggt jeden Tastennamen live
-python -m flowtext --combo '<ctrl>+<shift>+d'
-python -m flowtext --tap-key shift_r
-```
-
-**Belegte Auslöser** (FlowText warnt beim Start):
-
-| Auslöser | Belegt durch |
-| :--- | :--- |
-| Doppel-Tap Option (links/rechts) | Claude für Mac — Schnelleingabe |
-| `<ctrl>+<alt>+<space>` | macOS — nächste Eingabequelle |
-| `<ctrl>+<space>` | macOS — vorherige Eingabequelle |
-| `<cmd>+<space>` | macOS — Spotlight |
-| `<cmd>+<alt>+<space>` | macOS — Finder-Suchfenster |
-
-Freie Empfehlungen: Doppel-Tap `cmd_r`, `shift_r` oder `ctrl_r`; als Kombination
-`<ctrl>+<shift>+d` oder `<f5>`.
-
-> **Nicht `<ctrl>+<alt>+<space>` verwenden.** Das ist der macOS-Systemkurzbefehl
-> „nächste Eingabequelle". Er wechselt die Tastaturbelegung und tippt wegen Option+Space
-> ein unsichtbares geschütztes Leerzeichen (U+00A0) in das gerade fokussierte Textfeld —
-> genau dorthin, wo FlowText anschließend diktieren soll.
+| `mlx-community/whisper-large-v3-turbo` | ~1.5 GB | **Default** — Best accuracy, fast on Apple Silicon M-series |
+| `mlx-community/whisper-small-mlx` | ~0.5 GB | Recommended if RAM is low |
+| `mlx-community/whisper-tiny` | ~0.1 GB | Testing / low hardware usage |
 
 ---
 
-## Architektur
+## 🤖 Optional: Local LLM Correction (Ollama)
 
-```
-Event-Tap-Thread   → nur queue.put_nowait()      < 1 ms, Pflicht
-Controller-Thread  → Zustandsautomat, Stream-Start/Stop
-Worker-Thread      → Transkription, LLM, Ausgabe (darf Sekunden dauern)
-Supervisor-Thread  → startet einen gestorbenen Listener neu
-PortAudio-Callback → nur queue.put_nowait()      kein Lock
-```
+To automatically fix grammar, punctuation, and typos using a local LLM:
 
-Zwei Regeln, aus denen sich fast alles ableitet:
-
-**Der Event-Tap-Callback darf nicht blockieren.** macOS deaktiviert einen Tap dauerhaft,
-wenn dessen Callback zu lange braucht (`kCGEventTapDisabledByTimeout`) — und pynput
-reaktiviert ihn nie. Deshalb macht der Callback nichts außer Set-Logik und einem
-`put_nowait`. Die tatsächliche Dauer wird gemessen und beim Beenden protokolliert.
-
-**Der Audio-Callback nimmt kein Lock.** `stream.stop()` wartet auf das Ende des laufenden
-Callbacks. Nimmt der Callback ein Lock, das der stoppende Thread hält, ist das ein
-Deadlock. Puffer werden deshalb über eine Queue übergeben.
-
-```
-flowtext/
-├── __main__.py       CLI, Signal-Handling
-├── app.py            Controller, Zustandsautomat, Thread-Orchestrierung
-├── config.py         Dataclasses + TOML, Validierung, Shortcut-Konflikte
-├── permissions.py    AXIsProcessTrusted + IOHIDCheckAccess, verantwortliche App
-├── diagnostics.py    Umgebung, Berechtigungen, Mikrofon, Tastatur
-├── menubar.py        Statusicon (rumps), optional
-├── state.py          State-Enum, StateMachine mit Observern
-├── feedback.py       Systemsounds
-├── hotkey/
-│   ├── detectors.py  reine Trigger-Logik (voll unit-getestet)
-│   ├── keynames.py   pynput-Key → stabiler Name (über macOS-vk)
-│   └── service.py    Listener, Supervisor, Event-Watchdog
-├── audio/
-│   ├── recorder.py   deadlockfreie Aufnahme
-│   └── devices.py    Geräteabfrage
-└── pipeline/
-    ├── base.py            Protocols + Verdrahtung
-    ├── factory.py         Aufbau aus der Konfiguration
-    ├── transcribe_mlx.py  mlx-whisper
-    ├── refine_ollama.py   LLM-Korrektur
-    ├── inject_macos.py    Zwischenablage + Cmd+V
-    └── stub.py            Platzhalter für den Trockenlauf
-```
-
-`tools/diagnose.py` und `--watch-keys` sind beide dünne Aufrufer von
-`flowtext.diagnostics` — die Diagnoselogik existiert nur einmal.
+1. Download and install [Ollama](https://ollama.com).
+2. Download a model in your terminal:
+   ```bash
+   ollama pull qwen2.5:7b
+   ```
+3. Set `refiner = "ollama"` in your `config.toml`.
 
 ---
 
-## Entwicklung
+## 🛠️ Troubleshooting & FAQ
+
+| Problem | Cause | Solution |
+| :--- | :--- | :--- |
+| **Double-tap does nothing** | Missing macOS Accessibility or Input Monitoring permissions. | Run `python -m flowtext --watch-keys` to test. Ensure Terminal is enabled in **System Settings $\rightarrow$ Privacy & Security**, then press **`Cmd + Q`** to restart Terminal. |
+| **Hotkey triggers another app** | Shortcut conflict (e.g., Claude for Mac uses double-tap Option). | Default is set to `cmd` (Command key). You can change `tap_key` in `config.toml` to `shift_r` or `ctrl_r`. |
+| **Recording starts, but output is empty** | Microphone permission missing or wrong audio input device. | Run `python tools/diagnose.py` to test your microphone input level. |
+| **First dictation takes long** | Whisper model downloading on first launch (~1.5 GB). | FlowText warms up the model automatically during startup. |
+
+---
+
+## 🧪 Developer Testing & Verification
+
+FlowText comes with a comprehensive test suite of 173 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
-pytest                  # 173 Tests, laufen ohne macOS
+# Run test suite
+pytest
+
+# Code formatting and linting
 ruff check . && ruff format --check .
-mypy                    # strict, Zielplattform darwin
+mypy --strict
 ```
-
-Die Tests kommen ohne mlx-whisper, Ollama, pyperclip und rumps aus: sie schieben
-Fake-Module in `sys.modules` und prüfen damit die Logik statt der Fremdbibliothek.
-
-Fehlt ein Extra zur Laufzeit, fällt das beim **Start** auf (die Factory prüft mit
-`find_spec`, bevor sie baut) und nicht erst beim ersten Diktat. FlowText läuft dann
-mit dem Stub weiter und sagt im Log, was fehlt.
-
-Die Trigger-Erkennung arbeitet auf normalisierten Tastennamen und expliziten Zeitstempeln
-statt auf pynput-Objekten — dadurch ist sie ohne Event-Tap testbar. Der `AudioRecorder`
-nimmt eine austauschbare Stream-Fabrik, sodass die Tests ohne PortAudio auskommen.
 
 ---
 
-## Fehlersuche
+## 📄 License & Credits
 
-| Symptom | Ursache | Abhilfe |
-| :--- | :--- | :--- |
-| Auslöser öffnet eine andere App | Shortcut ist belegt (z. B. Claude bei Doppel-Tap Option) | `tap_key` auf `cmd_r` oder `shift_r` ändern |
-| **Auslöser macht gar nichts** | siehe Kasten unten | `python -m flowtext --watch-keys` |
-| Doppel-Tap wird selten erkannt | zu langsam getippt | `double_tap_window` auf `0.6` erhöhen |
-| Funktioniert 1–2×, dann nicht mehr | Event-Tap wurde deaktiviert | Log auf „Hotkey-Callback brauchte … ms" prüfen |
-| Aufnahme startet, Datei ist stumm | Mikrofonberechtigung oder falsches Gerät | `audio.device` in der Konfiguration setzen |
-| Text wird nicht eingefügt, liegt aber in der Ablage | Cmd+V braucht Bedienungshilfen | Freigabe prüfen, oder `paste = false` und von Hand einfügen |
-| Erstes Diktat dauert ewig | Modell wird noch geladen | einmalig; Log zeigt „Whisper-Modell bereit" |
-| Transkript kommt auf Englisch | Auto-Erkennung bei kurzem Diktat | `language = "de"` setzen (Standard) |
-| LLM antwortet statt zu korrigieren | Modell hält den Text für eine Frage | wird automatisch verworfen; ggf. `ollama_prompt` schärfen |
-| Auslöser feuert versehentlich | Doppel-Tap-Fenster zu groß | `double_tap_window` auf 0.25 senken |
-| Auslöser feuert zu selten | Fenster zu klein | `double_tap_window` auf 0.45 erhöhen |
-
-### „Der Auslöser macht gar nichts"
-
-Erst die entscheidende Frage klären — kommen überhaupt Tastaturereignisse an?
-
-```bash
-python -m flowtext --watch-keys
-```
-
-- **`Ereignisse gesamt: 0`** → der Event-Tap liefert nichts. Das ist immer eine
-  Berechtigung, nie der Auslöser. Bedienungshilfen **und** Eingabeüberwachung für
-  die startende App setzen, dann `Cmd+Q` und neu starten.
-- **Ereignisse > 0, Auslösungen 0** → Events kommen an, aber der Name passt nicht.
-  Mit `--log-level DEBUG` ablesen, welchen Namen deine Taste bekommt, und
-  `hotkey.tap_key` entsprechend setzen.
-- **Auslösungen > 0** → der Hotkey ist in Ordnung, das Problem liegt weiter hinten
-  (Mikrofon, Pipeline). Ins Log schauen.
-
-Läuft FlowText normal und kommt in den ersten 20 Sekunden kein einziges Ereignis an,
-meldet sich der Watchdog von selbst mit derselben Anleitung.
-
-Logs: `~/Library/Logs/FlowText/flowtext.log`
-Temporäre Aufnahmen: `~/Library/Application Support/FlowText/tmp/` (werden nach der
-Verarbeitung gelöscht, Reste älter als 24 h beim Start)
-
----
-
-## Weiterführend
-
-- [`ANALYSE_UND_UMSETZUNGSPLAN.md`](ANALYSE_UND_UMSETZUNGSPLAN.md) — Root-Cause-Analyse,
-  Code-Review und Umsetzungsplan
-- [`PROJECT_PLAN.md`](PROJECT_PLAN.md) — Vision, Tech-Stack, Roadmap
+Built with ❤️ for Apple Silicon Mac users. 
+* Speech Recognition powered by [Apple MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper).
+* Text Refinement powered by [Ollama](https://ollama.com).
