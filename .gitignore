@@ -1,29 +1,55 @@
+# Virtuelle Umgebungen & Python-Artefakte
 .venv/
 venv/
+env/
+ENV/
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
 *.egg-info/
+.eggs/
 build/
 dist/
 
-# Audio-Artefakte (dürfen NIE ins Repo)
+# Audio-Artefakte & Temporäre Aufnahmen (dürfen NIE ins Repo)
 *.wav
-*.flac
+*.mp3
 *.m4a
+*.flac
+*.ogg
+tmp/
+temp_audio.wav
 
-# Lokale Nutzer-Konfiguration
+# Lokale Nutzer-Konfiguration & Umgebungsvariablen
 config.local.toml
+.env
+.env.local
+.env.*.local
 
 # Logs
 logs/
 *.log
 
-# Tooling-Caches
+# Tooling-Caches & Coverage
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+coverage.xml
 
-# macOS
+# IDEs & Editor-Dateien
+.vscode/
+.idea/
+.zed/
+*.swp
+*.swo
+*~
+
+# macOS Systemdateien
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
