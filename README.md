@@ -2,7 +2,9 @@
 
 **FlowText** is an ultra-fast, **100% local voice-to-text dictation application** built specifically for macOS (optimized for Apple Silicon M1/M2/M3/M4 with Unified Memory).
 
-Unlike cloud-based speech-to-text tools, **FlowText runs entirely on your Mac**. No audio data, recordings, or transcribed text ever leave your computer.
+Unlike cloud-based speech-to-text tools, **FlowText runs 100% offline on your Mac**. No audio data, recordings, or transcribed text ever leave your computer.
+
+> 💡 **Standalone & Lightweight out-of-the-box:** FlowText works completely standalone using Apple's MLX Whisper engine (`refiner = "none"`). You do **NOT** need Ollama or any external tools to run dictation!
 
 ---
 
@@ -11,9 +13,9 @@ Unlike cloud-based speech-to-text tools, **FlowText runs entirely on your Mac**.
 * 🔒 **100% Offline & Private**: Zero cloud APIs. Maximum data privacy.
 * 🚀 **Apple Silicon Accelerated**: Uses Apple's `mlx-whisper` framework for fast, GPU/Neural Engine-accelerated transcription.
 * ⌨️ **Double-Tap Hotkey**: Simply double-tap the **`⌘` Command key** (or custom shortcuts) anywhere on macOS to start and stop dictation.
-* 🤖 **Local LLM Text Refinement**: Optional grammar correction and formatting via local `Ollama` models (e.g., `qwen2.5:7b` / `llama3.2`).
+* 🤖 **Optional Power-User LLM Refinement**: Optional grammar correction and formatting via local `Ollama` models (disabled by default, no setup required).
 * 📋 **Universal Text Injection**: Automatically pastes transcribed text into whatever text field or application you are currently typing in (`Cmd+V`).
-* 🖥️ **Menu Bar Integration**: Displays live status (Ready, Recording, Processing, Paused) in your macOS menu bar.
+* 🖥️ **Menu Bar Integration**: Displays live status (Ready ⚪, Recording 🔴, Processing 🟡, Paused ⏸️) in your macOS menu bar.
 * 🛡️ **Sub-Millisecond Engine**: Non-blocking architecture (< 1ms callback latency) with an automated watchdog that keeps keyboard listeners alive.
 
 ---
@@ -44,7 +46,7 @@ git clone https://github.com/capcup/flow-text.git
 # 2. Enter the project folder
 cd flow-text
 
-# 3. Create a isolated Python environment
+# 3. Create an isolated Python environment
 python3 -m venv .venv
 
 # 4. Activate the environment
@@ -116,7 +118,7 @@ min_seconds = 0.3          # Recordings shorter than 0.3s are ignored
 transcriber = "mlx"       # Uses mlx-whisper (or "stub" for dry-runs)
 whisper_model = "mlx-community/whisper-large-v3-turbo"
 language = "de"           # Language code ("de", "en", "fr", "es", etc.)
-refiner = "none"          # Set to "ollama" for local LLM grammar correction
+refiner = "none"          # Standalone default ("none"). Set to "ollama" if desired.
 injector = "clipboard"    # Copies text and performs Cmd+V
 ```
 
@@ -130,9 +132,11 @@ injector = "clipboard"    # Copies text and performs Cmd+V
 
 ---
 
-## 🤖 Optional: Local LLM Correction (Ollama)
+## 🤖 Optional Power-User Feature: Local LLM Refinement (Ollama)
 
-To automatically fix grammar, punctuation, and typos using a local LLM:
+FlowText works 100% standalone out-of-the-box (`refiner = "none"`). Installing Ollama is **completely optional**.
+
+If you wish to automatically clean up filler words ("um", "uh"), fix complex grammar, or reformat speech into bullet points using a local LLM:
 
 1. Download and install [Ollama](https://ollama.com).
 2. Download a model in your terminal:
@@ -140,6 +144,8 @@ To automatically fix grammar, punctuation, and typos using a local LLM:
    ollama pull qwen2.5:7b
    ```
 3. Set `refiner = "ollama"` in your `config.toml`.
+
+> 🛡️ **Fail-Safe Guarantee:** If Ollama is enabled but not running or unresponsive, FlowText automatically falls back to raw Whisper transcription — your dictation will never fail or drop text.
 
 ---
 
@@ -151,6 +157,7 @@ To automatically fix grammar, punctuation, and typos using a local LLM:
 | **Hotkey triggers another app** | Shortcut conflict (e.g., Claude for Mac uses double-tap Option). | Default is set to `cmd` (Command key). You can change `tap_key` in `config.toml` to `shift_r` or `ctrl_r`. |
 | **Recording starts, but output is empty** | Microphone permission missing or wrong audio input device. | Run `python tools/diagnose.py` to test your microphone input level. |
 | **First dictation takes long** | Whisper model downloading on first launch (~1.5 GB). | FlowText warms up the model automatically during startup. |
+| **Do I need Ollama installed?** | No! | FlowText runs 100% standalone with Whisper by default (`refiner = "none"`). |
 
 ---
 
