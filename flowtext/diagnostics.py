@@ -9,11 +9,13 @@ ob überhaupt Ereignisse ankommen.
 
 from __future__ import annotations
 
+import os
 import queue
 import sys
 import time
 
 from . import permissions
+from .bundle import BUNDLE_ENV_VAR
 from .config import Config, conflicts
 from .hotkey.service import TRIGGER, HotkeyService
 
@@ -39,10 +41,13 @@ def report_environment() -> None:
     print("\n  Prozesskette (von FlowText aufwärts):")
     for pid, command in permissions.process_chain():
         print(f"    {pid:>7}  {command[:84]}")
-    if ".pyenv" in sys.executable or ".venv" in sys.executable:
+    if os.environ.get(BUNDLE_ENV_VAR):
+        print(f"\n  {OK}Start aus dem eigenen App-Bundle — das Terminal braucht keine Rechte.")
+    elif ".pyenv" in sys.executable or ".venv" in sys.executable:
         print(
             f"\n  {WARN}pyenv/venv erkannt. macOS vergibt Berechtigungen an die App\n"
-            "     aus der Prozesskette oben, nicht an dieses Python-Binary."
+            "     aus der Prozesskette oben, nicht an dieses Python-Binary.\n"
+            "     Eigene Identität bekommst du mit: python tools/make_app.py"
         )
 
 

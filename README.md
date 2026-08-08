@@ -17,6 +17,7 @@ Unlike cloud-based speech-to-text tools, **FlowText runs 100% offline on your Ma
 * 📋 **Universal Text Injection**: Automatically pastes transcribed text into whatever text field or application you are currently typing in (`Cmd+V`).
 * 🖥️ **Menu Bar Integration**: Displays live status (Ready ⚪, Recording 🔴, Processing 🟡, Paused ⏸️) in your macOS menu bar.
 * 🛡️ **Sub-Millisecond Engine**: Non-blocking architecture (< 1ms callback latency) with an automated watchdog that keeps keyboard listeners alive.
+* 🔐 **Standalone App Bundle**: Build `FlowText.app` in one command so macOS permissions belong to FlowText — not to your Terminal.
 
 ---
 
@@ -98,6 +99,75 @@ macOS has strict security settings for reading keyboard shortcuts and accessing 
 
 ---
 
+## 🖥️ Step 6: Run FlowText from the Menu Bar (Recommended)
+
+Instead of keeping a Terminal window open, FlowText can live in your menu bar:
+
+```bash
+pip install 'rumps>=0.4.0'
+python -m flowtext --menubar
+```
+
+The icon shows you what FlowText is doing at a glance:
+
+| Icon | Meaning |
+| :---: | :--- |
+| 🎙 | Ready and waiting |
+| 🔴 | Recording |
+| ⏳ | Transcribing |
+| ⏸ | Paused |
+| ⚠️ | Error — check the log |
+
+Click the icon for: pause/resume, open `config.toml`, open the log file, quit.
+
+---
+
+## 🔐 Step 7: Free Your Terminal (Optional but Recommended)
+
+In Step 4 you gave **Terminal** permission to watch your keyboard. That permission
+applies to *everything* you ever run from that Terminal — not just FlowText.
+
+You can fix that by turning FlowText into its own small macOS app:
+
+```bash
+python tools/make_app.py     # creates dist/FlowText.app
+open dist/FlowText.app
+```
+
+macOS will now ask for **Accessibility** and **Input Monitoring** for *FlowText itself*.
+Once it works, go back to **System Settings → Privacy & Security** and switch those
+permissions **off for your Terminal**. FlowText keeps working — your Terminal no longer
+has access to your keystrokes.
+
+> 💡 **Nothing gets copied.** The app is just two small files pointing at your existing
+> `.venv`. The 2 GB of model data stays where it is, and code changes take effect
+> immediately — no rebuild needed.
+
+**Autostart:** drag `FlowText.app` into **System Settings → General → Login Items**.
+
+<details>
+<summary>What's inside the app bundle, and why</summary>
+
+```
+FlowText.app/Contents/
+├── Info.plist        Bundle ID, LSUIElement, microphone reason
+└── MacOS/FlowText    #!/bin/zsh … exec …/.venv/bin/python3 -m flowtext --menubar
+```
+
+| Detail | Why it matters |
+| :--- | :--- |
+| `NSMicrophoneUsageDescription` | Without this key, macOS silently kills the app on first microphone access |
+| `LSUIElement = true` | Keeps a Dock icon from appearing next to the menu bar icon |
+| Ad-hoc signature (`codesign -s -`) | Without a signature, macOS identifies the app by content hash and forgets your permission on every rebuild |
+
+`tools/make_app.py` handles all three. If you rebuild the app, macOS may still reset
+the permission — just approve it once more.
+
+If the app doesn't launch, the reason is in `~/Library/Logs/FlowText/launcher.log`.
+</details>
+
+---
+
 ## ⚙️ Configuration (`config.toml`)
 
 FlowText can be customized by editing the `config.toml` file in the project folder. You can open it in any text editor.
@@ -158,12 +228,14 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 | **Recording starts, but output is empty** | Microphone permission missing or wrong audio input device. | Run `python tools/diagnose.py` to test your microphone input level. |
 | **First dictation takes long** | Whisper model downloading on first launch (~1.5 GB). | FlowText warms up the model automatically during startup. |
 | **Do I need Ollama installed?** | No! | FlowText runs 100% standalone with Whisper by default (`refiner = "none"`). |
+| **I don't want Terminal to read my keystrokes** | Permissions belong to whichever app starts FlowText. | Build the standalone app: `python tools/make_app.py` (see Step 7), then switch the permissions off for Terminal. |
+| **App bundle won't start** | Wrong project path, or the `.venv` moved. | Check `~/Library/Logs/FlowText/launcher.log`, then rebuild with `python tools/make_app.py`. |
 
 ---
 
 ## 🧪 Developer Testing & Verification
 
-FlowText comes with a comprehensive test suite of 173 automated tests that run without requiring real microphone input or active macOS GUI permissions:
+FlowText comes with a comprehensive test suite of 193 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
 # Run test suite

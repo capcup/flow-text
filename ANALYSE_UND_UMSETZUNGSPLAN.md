@@ -39,9 +39,14 @@
 > | Stille bei fehlender Berechtigung | ✅ | `responsible_app()`, `--watch-keys`, Event-Watchdog |
 > | Phase 4 (mlx-whisper, Ollama, Injektion) | ✅ | `pipeline/transcribe_mlx.py`, `refine_ollama.py`, `inject_macos.py` |
 >
-> Damit ist der Plan aus §6 vollständig abgearbeitet. Offen bleibt nur noch
-> [§9](#9-roadmap-v11--v20): Menüleisten-App, Push-to-Talk, Streaming-Transkription
-> und das signierte `.app`-Bundle.
+> Damit ist der Plan aus §6 vollständig abgearbeitet. Aus [§9](#9-roadmap-v11--v20)
+> sind inzwischen ebenfalls erledigt: Menüleisten-App mit Statusicon und das
+> `.app`-Bundle — letzteres als **Launcher**-Bundle statt py2app. Es packt nichts
+> ein, sondern zeigt auf das vorhandene `.venv`, und kostete damit eine Stunde
+> statt zwei Tage. Der entscheidende Gewinn ist derselbe: FlowText hat eine eigene
+> TCC-Identität, das Terminal braucht keine Rechte mehr.
+>
+> Offen bleiben Push-to-Talk, Streaming-Transkription und die Vokabularlisten.
 
 ---
 

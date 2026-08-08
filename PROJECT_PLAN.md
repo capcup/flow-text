@@ -92,6 +92,8 @@
 
 ### Version 1.4 - UX & Performance Refinements
 - [x] Menüleisten-App via `rumps` mit Statusicon, Pause und Schnellzugriffen
+- [x] `FlowText.app`-Launcher-Bundle (`tools/make_app.py`): eigene TCC-Identität,
+      dadurch braucht das Terminal keine Bedienungshilfen/Eingabeüberwachung mehr
 - [ ] Push-to-Talk als Alternative zum Toggle
 - [ ] Stream-/Chunk-basiertes Buffer-Management
 - [ ] Dynamic Whisper Model Selection (`tiny`, `base`, `small`, `large-v3-turbo`)
@@ -108,3 +110,5 @@ Aufgrund der macOS-Sicherheitsarchitektur benötigt Python / das Terminal folgen
 3. **Eingabeüberwachung (Input Monitoring)**: **Zwingend erforderlich**, nicht optional. Ein Session-Level-Event-Tap braucht `kTCCServiceListenEvent`; `AXIsProcessTrusted()` deckt diese Berechtigung nicht ab.
 
 **Wichtig:** Die Freigabe gilt der *startenden App* (Terminal.app, iTerm2, VS Code, Cursor) — nicht dem Python-Binary. Nach dem Erteilen die App mit `Cmd+Q` vollständig beenden und neu starten. `python tools/diagnose.py` prüft alle drei Berechtigungen und meldet, was fehlt.
+
+**Empfohlener Weg seit v1.4:** `python tools/make_app.py` erzeugt `FlowText.app`. Damit hat FlowText eine *eigene* TCC-Identität — die Freigaben gelten dann nur noch FlowText, und das Terminal kann sie zurückbekommen. Das Bundle packt nichts ein, es zeigt lediglich auf das vorhandene `.venv`.

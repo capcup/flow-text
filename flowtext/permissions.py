@@ -180,7 +180,19 @@ def responsible_app() -> str | None:
     """Das App-Bundle, das die Berechtigungen braucht — oder ``None``.
 
     Genau dieser Pfad muss in Bedienungshilfen und Eingabeüberwachung stehen.
+
+    Läuft FlowText aus dem eigenen ``FlowText.app``, taucht das Bundle nicht
+    in der Prozesskette auf: der Launcher benutzt ``exec``, wodurch der
+    Python-Prozess die Shell *ersetzt* und in ``ps`` nur noch der
+    Interpreter-Pfad steht. Deshalb setzt der Launcher zusätzlich eine
+    Umgebungsvariable, die hier Vorrang hat.
     """
+    from .bundle import BUNDLE_ENV_VAR
+
+    own_bundle = os.environ.get(BUNDLE_ENV_VAR)
+    if own_bundle:
+        return own_bundle
+
     marker = ".app/Contents/MacOS/"
     for _, command in process_chain():
         if marker in command:
