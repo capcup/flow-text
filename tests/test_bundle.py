@@ -16,12 +16,16 @@ import pytest
 from flowtext.bundle import (
     BUNDLE_ENV_VAR,
     DEFAULT_BUNDLE_ID,
+    LAUNCH_SCRIPT,
     BundleSpec,
     build,
     codesign,
+    host_architecture,
     info_plist,
     launcher_script,
     next_steps,
+    stub_source,
+    verify_interpreter,
 )
 
 
@@ -105,25 +109,26 @@ class TestLauncherScript:
 
 class TestBuild:
     def test_creates_the_bundle_layout(self, spec: BundleSpec, tmp_path: Path) -> None:
-        app = build(spec, tmp_path / "dist")
+        app = build(spec, tmp_path / "dist").app_path
         assert app.name == "FlowText.app"
         assert (app / "Contents" / "Info.plist").is_file()
         assert (app / "Contents" / "MacOS" / "FlowText").is_file()
+        assert (app / "Contents" / "MacOS" / LAUNCH_SCRIPT).is_file()
 
-    def test_launcher_is_executable(self, spec: BundleSpec, tmp_path: Path) -> None:
-        app = build(spec, tmp_path / "dist")
-        mode = (app / "Contents" / "MacOS" / "FlowText").stat().st_mode
-        assert mode & stat.S_IXUSR
+    def test_entry_point_is_executable(self, spec: BundleSpec, tmp_path: Path) -> None:
+        app = build(spec, tmp_path / "dist").app_path
+        for name in ("FlowText", LAUNCH_SCRIPT):
+            assert (app / "Contents" / "MacOS" / name).stat().st_mode & stat.S_IXUSR
 
     def test_plist_is_valid(self, spec: BundleSpec, tmp_path: Path) -> None:
-        app = build(spec, tmp_path / "dist")
+        app = build(spec, tmp_path / "dist").app_path
         with (app / "Contents" / "Info.plist").open("rb") as fh:
             plist = plistlib.load(fh)
         assert plist["CFBundleIdentifier"] == DEFAULT_BUNDLE_ID
         assert plist["LSUIElement"] is True
 
     def test_rebuild_replaces_the_old_bundle(self, spec: BundleSpec, tmp_path: Path) -> None:
-        app = build(spec, tmp_path / "dist")
+        app = build(spec, tmp_path / "dist").app_path
         stray = app / "Contents" / "leftover.txt"
         stray.write_text("alt", encoding="utf-8")
         build(spec, tmp_path / "dist")
@@ -131,9 +136,20 @@ class TestBuild:
 
     def test_bundle_does_not_copy_the_venv(self, spec: BundleSpec, tmp_path: Path) -> None:
         """Der Kern der Idee: nichts einpacken, nur darauf zeigen."""
-        app = build(spec, tmp_path / "dist")
+        app = build(spec, tmp_path / "dist").app_path
         files = [p for p in app.rglob("*") if p.is_file()]
-        assert len(files) == 2  # Info.plist + Launcher
+        assert len(files) == 3  # Info.plist + Stub + launch.sh
+
+    def test_falls_back_to_the_script_without_a_compiler(
+        self, spec: BundleSpec, tmp_path: Path, monkeypatch
+    ) -> None:
+        from flowtext import bundle
+
+        monkeypatch.setattr(bundle, "compile_stub", lambda dest: (False, "kein clang"))
+        result = build(spec, tmp_path / "dist")
+        assert result.native_launcher is False
+        entry = result.app_path / "Contents" / "MacOS" / "FlowText"
+        assert entry.read_text(encoding="utf-8").startswith("#!/bin/zsh")
 
 
 # ---------------------------------------------------------------- Signatur/Doku
@@ -148,11 +164,112 @@ def test_codesign_refuses_outside_macos(monkeypatch, tmp_path: Path) -> None:
     assert "macOS" in message
 
 
-def test_next_steps_mentions_both_permissions(tmp_path: Path) -> None:
-    text = next_steps(tmp_path / "FlowText.app")
+def test_next_steps_mentions_both_permissions(spec: BundleSpec, tmp_path: Path) -> None:
+    text = next_steps(build(spec, tmp_path / "dist"))
     assert "Bedienungshilfen" in text
     assert "Eingabeüberwachung" in text
     assert "Terminal" in text
+
+
+def test_next_steps_warns_without_a_native_entry_point(
+    spec: BundleSpec, tmp_path: Path, monkeypatch
+) -> None:
+    """Sonst rätselt man über Fehler -10669."""
+    from flowtext import bundle
+
+    monkeypatch.setattr(bundle, "compile_stub", lambda dest: (False, "kein clang"))
+    text = next_steps(build(spec, tmp_path / "dist"))
+    assert "-10669" in text
+    assert "xcode-select --install" in text
+
+
+# --------------------------------------------- Regression: Architektur/Rosetta
+
+
+class TestNativeEntryPoint:
+    """Regression zu Fehler -10669.
+
+    Ist der Haupteinstieg ein Shellskript, kann Launch Services die
+    CPU-Architektur nicht ablesen, nimmt x86_64 an und verlangt Rosetta.
+    Deshalb muss dort ein echtes Mach-O-Binary stehen.
+    """
+
+    def test_stub_execs_the_launch_script(self) -> None:
+        source = stub_source()
+        assert LAUNCH_SCRIPT in source
+        assert "execl" in source
+        assert "_NSGetExecutablePath" in source
+
+    def test_stub_has_no_placeholder_left(self) -> None:
+        assert "LAUNCH_SCRIPT_NAME" not in stub_source()
+
+    def test_host_architecture_is_supported(self) -> None:
+        assert host_architecture() in {"arm64", "x86_64"}
+
+    def test_plist_declares_the_architecture(self, spec: BundleSpec) -> None:
+        assert info_plist(spec)["LSArchitecturePriority"] == [host_architecture()]
+
+    def test_compile_refuses_outside_macos(self, monkeypatch, tmp_path: Path) -> None:
+        from flowtext import bundle
+
+        monkeypatch.setattr(bundle.sys, "platform", "linux")
+        ok, message = bundle.compile_stub(tmp_path / "stub")
+        assert ok is False
+        assert "macOS" in message
+
+
+# ------------------------------------- Regression: venv darf nicht aufgelöst werden
+
+
+class TestInterpreterSelection:
+    """Regression: ``.venv/bin/python3`` ist ein Symlink auf den
+    Basis-Interpreter. Wird er aufgelöst, zeigt das Bundle am ``.venv``
+    vorbei und findet keine einzige Abhängigkeit."""
+
+    def test_venv_symlink_is_not_resolved(self, tmp_path: Path, monkeypatch) -> None:
+        import sys as _sys
+
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        from make_app import find_python
+
+        base = tmp_path / "pyenv" / "bin"
+        base.mkdir(parents=True)
+        real = base / "python3.12"
+        real.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        venv_bin = tmp_path / "project" / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        link = venv_bin / "python3"
+        link.symlink_to(real)
+
+        chosen = find_python(tmp_path / "project")
+        assert chosen == link
+        assert chosen != real
+        assert ".venv" in str(chosen)
+
+    def test_falls_back_to_the_running_interpreter(self, tmp_path: Path) -> None:
+        import sys as _sys
+
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        from make_app import find_python
+
+        assert find_python(tmp_path / "leer") == Path(_sys.executable)
+
+
+class TestVerifyInterpreter:
+    """Diese Prüfung hätte den venv-Fehler sofort aufgedeckt."""
+
+    def test_missing_interpreter(self, tmp_path: Path) -> None:
+        ok, message = verify_interpreter(tmp_path / "gibt-es-nicht", tmp_path)
+        assert ok is False
+        assert "nicht gefunden" in message
+
+    def test_interpreter_without_dependencies(self, tmp_path: Path) -> None:
+        import sys as _sys
+
+        ok, message = verify_interpreter(Path(_sys.executable), tmp_path)
+        assert ok is False
+        assert "rumps" in message or "ModuleNotFoundError" in message
 
 
 # ------------------------------------------------------- Erkennung zur Laufzeit

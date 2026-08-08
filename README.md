@@ -139,7 +139,7 @@ Once it works, go back to **System Settings → Privacy & Security** and switch 
 permissions **off for your Terminal**. FlowText keeps working — your Terminal no longer
 has access to your keystrokes.
 
-> 💡 **Nothing gets copied.** The app is just two small files pointing at your existing
+> 💡 **Nothing gets copied.** The app is just three small files pointing at your existing
 > `.venv`. The 2 GB of model data stays where it is, and code changes take effect
 > immediately — no rebuild needed.
 
@@ -151,7 +151,9 @@ has access to your keystrokes.
 ```
 FlowText.app/Contents/
 ├── Info.plist        Bundle ID, LSUIElement, microphone reason
-└── MacOS/FlowText    #!/bin/zsh … exec …/.venv/bin/python3 -m flowtext --menubar
+└── MacOS/
+    ├── FlowText      tiny native arm64 binary (CFBundleExecutable)
+    └── launch.sh     zsh script → …/.venv/bin/python3 -m flowtext --menubar
 ```
 
 | Detail | Why it matters |
@@ -159,9 +161,12 @@ FlowText.app/Contents/
 | `NSMicrophoneUsageDescription` | Without this key, macOS silently kills the app on first microphone access |
 | `LSUIElement = true` | Keeps a Dock icon from appearing next to the menu bar icon |
 | Ad-hoc signature (`codesign -s -`) | Without a signature, macOS identifies the app by content hash and forgets your permission on every rebuild |
+| **Native binary entry point** | macOS cannot read a CPU architecture from a text file. With a shell script as the entry point it assumes x86_64 and demands Rosetta — launch fails with **error -10669** |
+| Unresolved `.venv` symlink | `.venv/bin/python3` is a symlink to your base interpreter. Resolving it bypasses the virtual environment and no dependency is found |
 
-`tools/make_app.py` handles all three. If you rebuild the app, macOS may still reset
-the permission — just approve it once more.
+`tools/make_app.py` handles all of these, and verifies up front that the chosen
+interpreter can actually import FlowText and its dependencies. If you rebuild the app,
+macOS may still reset the permission — just approve it once more.
 
 If the app doesn't launch, the reason is in `~/Library/Logs/FlowText/launcher.log`.
 </details>
@@ -230,12 +235,13 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 | **Do I need Ollama installed?** | No! | FlowText runs 100% standalone with Whisper by default (`refiner = "none"`). |
 | **I don't want Terminal to read my keystrokes** | Permissions belong to whichever app starts FlowText. | Build the standalone app: `python tools/make_app.py` (see Step 7), then switch the permissions off for Terminal. |
 | **App bundle won't start** | Wrong project path, or the `.venv` moved. | Check `~/Library/Logs/FlowText/launcher.log`, then rebuild with `python tools/make_app.py`. |
+| **`error -10669` when opening the app** | Missing Command Line Tools, so no native entry point could be compiled — macOS then wants Rosetta. | `xcode-select --install`, then rebuild. Fallback: `softwareupdate --install-rosetta --agree-to-license` |
 
 ---
 
 ## 🧪 Developer Testing & Verification
 
-FlowText comes with a comprehensive test suite of 193 automated tests that run without requiring real microphone input or active macOS GUI permissions:
+FlowText comes with a comprehensive test suite of 204 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
 # Run test suite

@@ -21,22 +21,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flowtext.bundle import DEFAULT_BUNDLE_ID, BundleSpec, build, codesign, next_steps
+from flowtext.bundle import (
+    DEFAULT_BUNDLE_ID,
+    BundleSpec,
+    build,
+    codesign,
+    next_steps,
+    verify_interpreter,
+)
 from flowtext.config import log_dir
 
 PROJECT = Path(__file__).resolve().parent.parent
 
 
-def _find_python() -> Path:
+def find_python(project: Path = PROJECT) -> Path:
     """Der Interpreter, der das Bundle starten soll.
 
-    Bevorzugt das ``.venv`` des Projekts — dort liegen die Abhängigkeiten.
-    Läuft dieses Skript bereits darin, ist es ohnehin dasselbe.
+    **Nicht ``resolve()`` verwenden.** ``.venv/bin/python3`` ist ein Symlink
+    auf den Basis-Interpreter (z. B. pyenv). Wird er aufgelöst, zeigt das
+    Bundle am ``.venv`` vorbei — und findet keine einzige Abhängigkeit mehr.
+    Der Symlink-Pfad ist genau das, was die virtuelle Umgebung ausmacht.
     """
-    venv_python = PROJECT / ".venv" / "bin" / "python3"
-    if venv_python.is_file():
-        return venv_python.resolve()
-    return Path(sys.executable).resolve()
+    for name in ("python3", "python"):
+        candidate = project / ".venv" / "bin" / name
+        if candidate.is_file():
+            return candidate
+    return Path(sys.executable)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -50,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python", type=Path, help="Interpreter für das Bundle")
     parser.add_argument("--bundle-id", default=DEFAULT_BUNDLE_ID, help="CFBundleIdentifier")
     parser.add_argument("--no-sign", action="store_true", help="Ad-hoc-Signatur überspringen")
+    parser.add_argument("--no-verify", action="store_true", help="Importprüfung überspringen")
     parser.add_argument("--open", action="store_true", help="Bundle danach starten")
     args = parser.parse_args(argv)
 
@@ -57,10 +68,28 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("FlowText.app lässt sich nur unter macOS erzeugen.\n")
         return 2
 
-    python = (args.python or _find_python()).resolve()
-    if not python.is_file():
-        sys.stderr.write(f"Interpreter nicht gefunden: {python}\n")
-        return 2
+    python = args.python.expanduser() if args.python else find_python()
+    if not python.is_absolute():
+        python = python.absolute()
+
+    print(f"Interpreter : {python}")
+    print(f"Projekt     : {PROJECT}")
+    print(f"Bundle-ID   : {args.bundle_id}")
+
+    if not args.no_verify:
+        ok, message = verify_interpreter(python, PROJECT)
+        print(f"Abhängigkeiten: {message}")
+        if not ok:
+            sys.stderr.write(
+                "\n❌ Dieser Interpreter kann FlowText nicht starten — Abbruch.\n\n"
+                "   Meistens fehlt das .venv oder es ist unvollständig:\n"
+                f"       cd {PROJECT}\n"
+                "       python3 -m venv .venv\n"
+                "       source .venv/bin/activate\n"
+                "       pip install -r requirements.txt\n\n"
+                "   Prüfen ohne Abbruch: --no-verify\n"
+            )
+            return 1
 
     spec = BundleSpec(
         python=python,
@@ -70,11 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args.dest.mkdir(parents=True, exist_ok=True)
-    app_path = build(spec, args.dest)
-
-    print(f"Interpreter : {python}")
-    print(f"Projekt     : {PROJECT}")
-    print(f"Bundle-ID   : {spec.bundle_id}")
+    result = build(spec, args.dest)
+    print(f"Einstiegspunkt: {result.note}")
 
     if args.no_sign:
         print("Signatur    : übersprungen (--no-sign)")
@@ -83,17 +109,17 @@ def main(argv: list[str] | None = None) -> int:
             "   Die Berechtigung geht dann bei jedem Neubau verloren."
         )
     else:
-        ok, message = codesign(app_path, spec.bundle_id)
+        ok, message = codesign(result.app_path, spec.bundle_id)
         print(f"Signatur    : {message}")
         if not ok:
             print("\n⚠️  Signieren fehlgeschlagen — das Bundle läuft, aber die")
             print("   Berechtigung überlebt einen Neubau womöglich nicht.")
 
-    print("\n" + next_steps(app_path))
+    print("\n" + next_steps(result))
 
     if args.open:
-        subprocess.Popen(["/usr/bin/open", str(app_path)])
-        print(f"Gestartet: {app_path}")
+        subprocess.Popen(["/usr/bin/open", str(result.app_path)])
+        print(f"Gestartet: {result.app_path}")
 
     return 0
 

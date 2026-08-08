@@ -7,18 +7,19 @@ Anwendung, die du dort startest. Startet FlowText dagegen aus einem
 App-Bundle, taucht **FlowText selbst** in der Liste auf und das Terminal
 braucht gar keine Rechte mehr.
 
-**Warum kein py2app.** Es wird nichts eingepackt. Das Bundle enthält nur eine
-``Info.plist`` und ein Startskript, das dein vorhandenes ``.venv`` aufruft:
+**Warum kein py2app.** Es wird nichts eingepackt. Das Bundle zeigt lediglich
+auf das vorhandene ``.venv``:
 
     FlowText.app/Contents/
     ├── Info.plist        Bundle-ID, LSUIElement, Mikrofon-Begründung
-    └── MacOS/FlowText    #!/bin/zsh … exec …/python -m flowtext --menubar
+    └── MacOS/
+        ├── FlowText      nativer arm64-Stub (CFBundleExecutable)
+        └── launch.sh     zsh-Skript, das …/python -m flowtext --menubar aufruft
 
 Das ``.venv`` bleibt, wo es ist; die 2 GB Modelldaten werden nicht kopiert.
-Aktualisierst du den Code, ist das Bundle sofort aktuell — es zeigt ja nur
-darauf.
+Aktualisierst du den Code, ist das Bundle sofort aktuell.
 
-**Drei Details, an denen es sonst scheitert:**
+**Vier Details, an denen es sonst scheitert:**
 
 * ``NSMicrophoneUsageDescription`` ist Pflicht. Fehlt der Schlüssel, beendet
   macOS die App beim ersten Mikrofonzugriff kommentarlos.
@@ -26,10 +27,16 @@ darauf.
   unerwünscht.
 * Das Bundle muss signiert sein, und sei es nur ad-hoc. Ohne Signatur hängt
   der TCC-Eintrag am Inhalts-Hash und geht bei jedem Neubau kaputt.
+* **Der Haupteinstieg muss ein Mach-O-Binary sein, kein Shellskript.** Aus
+  einer Textdatei kann Launch Services die CPU-Architektur nicht ablesen und
+  nimmt x86_64 an. Auf Apple Silicon ohne Rosetta scheitert der Start dann
+  mit ``-10669``. Deshalb wird ein winziger nativer Stub kompiliert, der nur
+  das danebenliegende ``launch.sh`` ausführt.
 """
 
 from __future__ import annotations
 
+import platform
 import plistlib
 import shlex
 import shutil
@@ -45,12 +52,43 @@ from . import __version__
 DEFAULT_BUNDLE_ID = "dev.local.flowtext"
 APP_NAME = "FlowText"
 
+#: Name des Shellskripts neben dem Stub.
+LAUNCH_SCRIPT = "launch.sh"
+
 #: Der Launcher setzt diese Variable, damit die Diagnose das Bundle erkennt.
 #: Nötig, weil ``exec`` die Shell ersetzt: in der Prozesskette steht danach
 #: nur noch der Python-Pfad, das ``.app`` ist nicht mehr zu sehen.
 BUNDLE_ENV_VAR = "FLOWTEXT_APP_BUNDLE"
 
 _MIC_REASON = "FlowText nimmt dein Diktat auf und transkribiert es lokal auf diesem Mac."
+
+#: Nativer Einstiegspunkt. Ermittelt den eigenen Pfad und startet das
+#: Skript daneben — mehr braucht es nicht. Entscheidend ist allein, dass
+#: hier ein echtes Mach-O-Binary mit Architekturangabe steht.
+_STUB_SOURCE = r"""
+#include <limits.h>
+#include <libgen.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <mach-o/dyld.h>
+
+int main(int argc, char *argv[]) {
+    char path[PATH_MAX];
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) != 0) {
+        return 1;
+    }
+    char resolved[PATH_MAX];
+    if (realpath(path, resolved) == NULL) {
+        return 1;
+    }
+    char script[PATH_MAX];
+    snprintf(script, sizeof(script), "%s/%s", dirname(resolved), "LAUNCH_SCRIPT_NAME");
+    execl("/bin/zsh", "zsh", script, (char *)NULL);
+    return 1;
+}
+"""
 
 
 @dataclass(frozen=True)
@@ -65,7 +103,22 @@ class BundleSpec:
     version: str = __version__
 
 
+@dataclass(frozen=True)
+class BuildResult:
+    app_path: Path
+    #: ``False`` = Rückfall auf das Skript als Haupteinstieg. Dann kann
+    #: macOS die Architektur nicht bestimmen und verlangt womöglich Rosetta.
+    native_launcher: bool
+    note: str
+
+
 # --------------------------------------------------------------------- Inhalte
+
+
+def host_architecture() -> str:
+    """``arm64`` oder ``x86_64`` — für ``-arch`` und ``LSArchitecturePriority``."""
+    machine = platform.machine()
+    return "arm64" if machine in {"arm64", "aarch64"} else "x86_64"
 
 
 def info_plist(spec: BundleSpec) -> dict[str, Any]:
@@ -84,6 +137,9 @@ def info_plist(spec: BundleSpec) -> dict[str, Any]:
         "NSHighResolutionCapable": True,
         # Ohne diesen Schlüssel beendet macOS die App beim Mikrofonzugriff.
         "NSMicrophoneUsageDescription": _MIC_REASON,
+        # Zusätzlicher Hinweis für Launch Services. Der native Stub sollte
+        # genügen; das hier hilft, falls der Rückfall auf das Skript greift.
+        "LSArchitecturePriority": [host_architecture()],
     }
 
 
@@ -117,11 +173,40 @@ exec {python} -m flowtext --menubar >> {log_dir}/launcher.log 2>&1
 """
 
 
+def stub_source() -> str:
+    """C-Quelltext des nativen Einstiegspunkts."""
+    return _STUB_SOURCE.replace("LAUNCH_SCRIPT_NAME", LAUNCH_SCRIPT)
+
+
 # ---------------------------------------------------------------------- Bauen
 
 
-def build(spec: BundleSpec, dest_dir: Path) -> Path:
-    """Legt ``<dest_dir>/<app_name>.app`` an und gibt den Pfad zurück."""
+def compile_stub(destination: Path) -> tuple[bool, str]:
+    """Kompiliert den nativen Einstiegspunkt nach ``destination``."""
+    if sys.platform != "darwin":
+        return False, "nativer Stub braucht macOS"
+
+    arch = host_architecture()
+    for compiler in (["/usr/bin/xcrun", "clang"], ["/usr/bin/clang"]):
+        try:
+            result = subprocess.run(
+                [*compiler, "-arch", arch, "-O2", "-o", str(destination), "-x", "c", "-"],
+                input=stub_source(),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            return True, f"nativer {arch}-Stub kompiliert"
+        last_error = (result.stderr or result.stdout).strip().splitlines()
+        return False, last_error[-1] if last_error else "clang meldete einen Fehler"
+    return False, "clang nicht gefunden — Command Line Tools installiert? (xcode-select --install)"
+
+
+def build(spec: BundleSpec, dest_dir: Path) -> BuildResult:
+    """Legt ``<dest_dir>/<app_name>.app`` an."""
     app_path = dest_dir / f"{spec.app_name}.app"
     contents = app_path / "Contents"
     macos = contents / "MacOS"
@@ -133,11 +218,19 @@ def build(spec: BundleSpec, dest_dir: Path) -> Path:
     with (contents / "Info.plist").open("wb") as fh:
         plistlib.dump(info_plist(spec), fh)
 
-    executable = macos / spec.app_name
-    executable.write_text(launcher_script(spec, app_path), encoding="utf-8")
-    executable.chmod(0o755)
+    script = macos / LAUNCH_SCRIPT
+    script.write_text(launcher_script(spec, app_path), encoding="utf-8")
+    script.chmod(0o755)
 
-    return app_path
+    entry = macos / spec.app_name
+    native, note = compile_stub(entry)
+    if not native:
+        # Rückfall: Skript direkt als Haupteinstieg. Startet aus dem Terminal,
+        # aber Launch Services kann die Architektur nicht bestimmen.
+        shutil.copy2(script, entry)
+        entry.chmod(0o755)
+
+    return BuildResult(app_path=app_path, native_launcher=native, note=note)
 
 
 def codesign(app_path: Path, bundle_id: str = DEFAULT_BUNDLE_ID) -> tuple[bool, str]:
@@ -155,6 +248,7 @@ def codesign(app_path: Path, bundle_id: str = DEFAULT_BUNDLE_ID) -> tuple[bool, 
             [
                 "/usr/bin/codesign",
                 "--force",
+                "--deep",
                 "--sign",
                 "-",
                 "--identifier",
@@ -173,22 +267,65 @@ def codesign(app_path: Path, bundle_id: str = DEFAULT_BUNDLE_ID) -> tuple[bool, 
     return True, "ad-hoc signiert"
 
 
-def next_steps(app_path: Path) -> str:
-    """Anleitung für die Berechtigungen nach dem Bau."""
-    return f"""\
-Bundle erzeugt: {app_path}
+# ----------------------------------------------------------------- Prüfungen
 
+
+def verify_interpreter(python: Path, project: Path) -> tuple[bool, str]:
+    """Kann dieser Interpreter FlowText überhaupt starten?
+
+    Fängt den häufigsten Fehlgriff ab: einen Interpreter *außerhalb* des
+    ``.venv``. Der findet die Abhängigkeiten nicht, und die App würde
+    kommentarlos scheitern.
+    """
+    if not python.is_file():
+        return False, f"Interpreter nicht gefunden: {python}"
+
+    modules = ["flowtext", "pynput", "sounddevice", "soundfile", "numpy", "rumps"]
+    code = "import " + ", ".join(modules)
+    try:
+        result = subprocess.run(
+            [str(python), "-c", code],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"Interpreter nicht ausführbar: {exc}"
+
+    if result.returncode == 0:
+        return True, "alle Abhängigkeiten importierbar"
+
+    detail = (result.stderr or result.stdout).strip().splitlines()
+    return False, detail[-1] if detail else "Import fehlgeschlagen"
+
+
+def next_steps(result: BuildResult) -> str:
+    """Anleitung für die Berechtigungen nach dem Bau."""
+    warning = ""
+    if not result.native_launcher:
+        warning = f"""
+⚠️  Kein nativer Einstiegspunkt ({result.note}).
+    macOS kann die Architektur dann nicht bestimmen und verlangt beim
+    Start womöglich Rosetta (Fehler -10669). Abhilfe:
+        xcode-select --install     # danach make_app.py erneut ausführen
+    oder ersatzweise:
+        softwareupdate --install-rosetta --agree-to-license
+"""
+    return f"""\
+Bundle erzeugt: {result.app_path}
+{warning}
 So geht es weiter:
 
   1. Einmal per Doppelklick oder mit
-         open {shlex.quote(str(app_path))}
+         open {shlex.quote(str(result.app_path))}
      starten. In der Menüleiste erscheint 🎙.
 
   2. macOS fragt nach Bedienungshilfen und Eingabeüberwachung — bestätigen.
      Falls kein Dialog kommt, die App von Hand eintragen:
          Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen
          Systemeinstellungen → Datenschutz & Sicherheit → Eingabeüberwachung
-     Dort "+" klicken und {app_path.name} auswählen.
+     Dort "+" klicken und {result.app_path.name} auswählen.
 
   3. Erst wenn FlowText in beiden Listen steht und läuft: dem Terminal
      (iTerm/Terminal.app) die Rechte wieder wegnehmen. Es braucht sie nicht
