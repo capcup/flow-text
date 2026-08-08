@@ -169,9 +169,20 @@ def test_callback_exception_does_not_escape(service, monkeypatch) -> None:
     assert listener.running
 
 
+def _permissions(monkeypatch, ok: bool) -> None:
+    from flowtext import permissions
+
+    state = permissions.Permissions(
+        accessibility=ok,
+        input_monitoring=permissions.HIDAccess.GRANTED if ok else permissions.HIDAccess.DENIED,
+    )
+    monkeypatch.setattr(permissions, "check", lambda: state)
+
+
 def test_watchdog_warns_when_no_events(monkeypatch, caplog) -> None:
-    """Ohne Ereignisse muss FlowText sagen, dass es an den Rechten liegt."""
+    """Ohne Ereignisse UND ohne Rechte muss FlowText Alarm schlagen."""
     monkeypatch.setattr(service_module, "_NO_EVENT_WARNING_SECONDS", 0.05)
+    _permissions(monkeypatch, ok=False)
     FakeListener.instances.clear()
     svc = HotkeyService(HotkeyConfig(), queue.Queue())
     monkeypatch.setattr(svc, "_make_listener", lambda: FakeListener(svc._on_press, svc._on_release))
@@ -182,8 +193,25 @@ def test_watchdog_warns_when_no_events(monkeypatch, caplog) -> None:
     assert any("KEIN einziges Tastaturereignis" in r.message for r in caplog.records)
 
 
+def test_watchdog_stays_calm_when_permissions_are_fine(monkeypatch, caplog) -> None:
+    """Regression: Stille beweist nichts — vielleicht hat niemand getippt.
+    Sind die Rechte erteilt, darf das kein Fehler sein."""
+    monkeypatch.setattr(service_module, "_NO_EVENT_WARNING_SECONDS", 0.05)
+    _permissions(monkeypatch, ok=True)
+    FakeListener.instances.clear()
+    svc = HotkeyService(HotkeyConfig(), queue.Queue())
+    monkeypatch.setattr(svc, "_make_listener", lambda: FakeListener(svc._on_press, svc._on_release))
+    with caplog.at_level("INFO", logger="flowtext.hotkey.service"):
+        svc.start()
+        time.sleep(0.3)
+        svc.stop(timeout=1.0)
+    assert not any(r.levelname == "ERROR" for r in caplog.records)
+    assert "normal" in caplog.text
+
+
 def test_watchdog_silent_when_events_arrive(monkeypatch, caplog) -> None:
     monkeypatch.setattr(service_module, "_NO_EVENT_WARNING_SECONDS", 0.15)
+    _permissions(monkeypatch, ok=False)
     FakeListener.instances.clear()
     svc = HotkeyService(HotkeyConfig(), queue.Queue())
     monkeypatch.setattr(svc, "_make_listener", lambda: FakeListener(svc._on_press, svc._on_release))

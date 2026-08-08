@@ -40,20 +40,25 @@ _SLOW_CALLBACK_SECONDS = 0.005
 #: nicht — dann meldet sich der Watchdog mit einer Anleitung.
 _NO_EVENT_WARNING_SECONDS = 20.0
 
+#: Der Watchdog kann "niemand tippt" nicht von "kein Zugriff" unterscheiden.
+#: Deshalb hängt der Ton der Meldung am Berechtigungsstatus: sind die Rechte
+#: erteilt, ist Stille völlig normal und wird nur beiläufig erwähnt.
+_NO_EVENT_HINT = (
+    "Seit %.0fs kein Tastaturereignis. Wenn du in der Zeit nichts getippt hast, "
+    "ist das normal — die Berechtigungen sind erteilt."
+)
+
 _NO_EVENT_HELP = """\
-Seit dem Start ist KEIN einziges Tastaturereignis angekommen.
+Seit dem Start ist KEIN einziges Tastaturereignis angekommen, und die
+Berechtigungen fehlen ebenfalls. Der Hotkey kann so nicht funktionieren.
 
-Das bedeutet: der Event-Tap liefert nichts — unabhängig davon, welcher
-Auslöser konfiguriert ist. Der Hotkey kann so gar nicht funktionieren.
-
-Fast immer eine fehlende Berechtigung für die App, aus der FlowText
-gestartet wurde (Terminal.app, iTerm2, VS Code, Cursor …):
+Freizugeben ist die App, aus der FlowText gestartet wurde (bei einem
+FlowText.app-Bundle ist das FlowText selbst):
 
   Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen
   Systemeinstellungen → Datenschutz & Sicherheit → Eingabeüberwachung
 
-Beide Schalter setzen, dann die App mit Cmd+Q VOLLSTÄNDIG beenden und neu
-starten. Zum Einrichten Terminal.app verwenden, nicht das IDE-Terminal.
+Beide Schalter setzen, dann die App vollständig beenden und neu starten.
 
 Zum Gegenprüfen:  python -m flowtext --watch-keys\
 """
@@ -125,12 +130,23 @@ class HotkeyService:
 
         Ohne diese Meldung äußert sich eine fehlende Berechtigung als
         vollkommene Stille — das Programm läuft, reagiert aber nie.
+
+        Stille allein beweist aber nichts: vielleicht hat einfach niemand
+        getippt. Deshalb wird der Berechtigungsstatus mitgeprüft und nur bei
+        tatsächlich fehlenden Rechten Alarm geschlagen.
         """
         if self._stop.wait(_NO_EVENT_WARNING_SECONDS):
             return
-        if self._event_count == 0:
-            for line in _NO_EVENT_HELP.splitlines():
-                log.error("%s", line)
+        if self._event_count:
+            return
+
+        from ..permissions import check
+
+        if check().ok:
+            log.info(_NO_EVENT_HINT, _NO_EVENT_WARNING_SECONDS)
+            return
+        for line in _NO_EVENT_HELP.splitlines():
+            log.error("%s", line)
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
