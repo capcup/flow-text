@@ -171,6 +171,15 @@ class MenubarApp:
 
     def _tick(self, _timer: Any) -> None:
         """Läuft im Hauptthread; nur hier wird die Oberfläche angefasst."""
+        if self.app.stop_requested:
+            # SIGTERM/SIGINT setzen nur ein Event. rumps blockiert den
+            # Hauptthread, also muss der Timer das Beenden auslösen —
+            # sonst wirkt ein pkill folgenlos.
+            import rumps
+
+            rumps.quit_application()
+            return
+
         self._ticks += 1
         if not self._permissions_ok and self._ticks % PERMISSION_RECHECK_TICKS == 0:
             # Erst nachsehen, wenn etwas fehlt: sobald der Nutzer die Freigabe

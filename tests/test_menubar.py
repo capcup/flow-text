@@ -390,3 +390,31 @@ def test_menubar_does_not_block_on_the_model(rumps_module, monkeypatch, tmp_path
     menu.run()  # würde ohne den Fix 5 s hängen
     assert menu._ui.ran
     blocked.set()
+
+
+def test_sigterm_quits_the_menubar_app(rumps_module, monkeypatch, tmp_path, quitted) -> None:
+    """Regression: der Signal-Handler setzt nur ein Event. Blockiert rumps
+    den Hauptthread und schaut niemand hin, verpufft SIGTERM — pkill wirkt
+    dann folgenlos."""
+    from flowtext import app as app_module
+
+    monkeypatch.setattr(app_module, "temp_dir", lambda: tmp_path / "tmp")
+    cfg = Config()
+    cfg.feedback.sound = False
+    flow = FlowTextApp(
+        cfg,
+        recorder=FakeRecorder(),  # type: ignore[arg-type]
+        hotkey=FakeHotkey(),  # type: ignore[arg-type]
+        pipeline=FakePipeline(),  # type: ignore[arg-type]
+    )
+    menu = menubar.MenubarApp(cfg, flow)
+    menu.run()
+    timer = FakeTimer.instances[-1]
+
+    timer.tick()
+    assert quitted == []  # noch kein Stopp angefordert
+
+    flow.request_stop()
+    assert flow.stop_requested
+    timer.tick()
+    assert quitted == [True]

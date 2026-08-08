@@ -108,6 +108,16 @@ class FlowTextApp:
         """Signalsicher: setzt nur ein Event, kein Logging, keine I/O."""
         self._stop.set()
 
+    @property
+    def stop_requested(self) -> bool:
+        """Wurde das Beenden angefordert (Ctrl+C, SIGTERM, Menü)?
+
+        Die Menüleisten-Variante blockiert in ``rumps.run()`` und muss das
+        selbst abfragen — sonst verpufft ein SIGTERM wirkungslos und
+        ``pkill`` scheint nicht zu funktionieren.
+        """
+        return self._stop.is_set()
+
     # ------------------------------------------------------------------ Pause
 
     @property
