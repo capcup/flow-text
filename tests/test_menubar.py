@@ -132,6 +132,18 @@ def menu(rumps_module, monkeypatch, tmp_path):
     return menubar.MenubarApp(cfg, flow)
 
 
+def _run_ui(menu) -> None:
+    """``menu.run()`` für Tests, die danach ticken.
+
+    Der echte ``rumps.run()`` blockiert bis zum Beenden. Der Fake kehrt
+    sofort zurück, wodurch das ``finally: shutdown()`` in ``MenubarApp.run``
+    greift und das Stop-Event setzt. Ohne Zurücksetzen würde jeder folgende
+    Tick die App sofort beenden.
+    """
+    menu.run()
+    menu.app._stop.clear()
+
+
 # ------------------------------------------------------------------ Anzeige
 
 
@@ -181,7 +193,7 @@ class TestMenubarApp:
     def test_tick_transfers_state_to_the_ui(self, menu) -> None:
         """Regression: der Zustand kommt aus dem Controller-Thread und darf
         Cocoa nur über den Timer im Hauptthread erreichen."""
-        menu.run()
+        _run_ui(menu)
         menu.app.state.transition(State.RECORDING)
         assert menu._ui.title == "🎙"  # noch nicht übertragen
         FakeTimer.instances[-1].tick()
@@ -189,7 +201,7 @@ class TestMenubarApp:
         assert menu._items["status"].title == "Nimmt auf …"
 
     def test_pause_toggles_and_relabels(self, menu) -> None:
-        menu.run()
+        _run_ui(menu)
         menu._toggle_pause(None)
         assert menu.app.paused
         FakeTimer.instances[-1].tick()
@@ -340,7 +352,7 @@ class TestPermissionState:
             pipeline=FakePipeline(),  # type: ignore[arg-type]
         )
         menu = menubar.MenubarApp(cfg, flow)
-        menu.run()
+        _run_ui(menu)
         timer = FakeTimer.instances[-1]
 
         self._with_permissions(monkeypatch, ok=True)
@@ -408,7 +420,7 @@ def test_sigterm_quits_the_menubar_app(rumps_module, monkeypatch, tmp_path, quit
         pipeline=FakePipeline(),  # type: ignore[arg-type]
     )
     menu = menubar.MenubarApp(cfg, flow)
-    menu.run()
+    _run_ui(menu)
     timer = FakeTimer.instances[-1]
 
     timer.tick()
