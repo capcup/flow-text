@@ -1,0 +1,29 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Audio-Artefakte (dürfen NIE ins Repo)
+*.wav
+*.flac
+*.m4a
+
+# Lokale Nutzer-Konfiguration
+config.local.toml
+
+# Logs
+logs/
+*.log
+
+# Tooling-Caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# macOS
+.DS_Store

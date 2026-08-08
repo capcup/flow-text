@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from flowtext.config import Config, ConfigError, load, validate
+
+
+def _write(tmp_path: Path, content: str) -> Path:
+    path = tmp_path / "config.toml"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_defaults_are_valid() -> None:
+    validate(Config())
+
+
+def test_default_hotkey_is_not_the_macos_system_shortcut() -> None:
+    """Regression: <ctrl>+<alt>+<space> ist 'nächste Eingabequelle'."""
+    cfg = Config()
+    assert cfg.hotkey.mode == "double_tap"
+    assert "<alt>" not in cfg.hotkey.combo or "<space>" not in cfg.hotkey.combo
+
+
+def test_loads_toml(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+        [hotkey]
+        mode = "combo"
+        combo = "<cmd>+<shift>+j"
+
+        [audio]
+        max_seconds = 60.0
+        """,
+    )
+    cfg = load(path)
+    assert cfg.hotkey.mode == "combo"
+    assert cfg.hotkey.combo == "<cmd>+<shift>+j"
+    assert cfg.audio.max_seconds == 60.0
+    assert cfg.audio.sample_rate == 16000  # Default bleibt erhalten
+    assert cfg.source == str(path)
+
+
+def test_unknown_key_is_rejected(tmp_path: Path) -> None:
+    path = _write(tmp_path, "[audio]\nsampel_rate = 16000\n")
+    with pytest.raises(ConfigError, match="Unbekannter"):
+        load(path)
+
+
+def test_invalid_toml_is_rejected(tmp_path: Path) -> None:
+    path = _write(tmp_path, "[audio\n")
+    with pytest.raises(ConfigError, match="TOML"):
+        load(path)
+
+
+def test_missing_file_falls_back_to_defaults(tmp_path: Path) -> None:
+    cfg = load(tmp_path / "gibt-es-nicht.toml")
+    assert cfg.source == "defaults"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda c: setattr(c.hotkey, "mode", "morse"),
+        lambda c: setattr(c.hotkey, "double_tap_window", 0.0),
+        lambda c: setattr(c.audio, "sample_rate", 12345),
+        lambda c: setattr(c.audio, "channels", 2),
+        lambda c: setattr(c.audio, "min_seconds", 999.0),
+    ],
+)
+def test_validation_catches_bad_values(mutate) -> None:
+    cfg = Config()
+    mutate(cfg)
+    with pytest.raises(ConfigError):
+        validate(cfg)

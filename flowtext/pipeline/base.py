@@ -1,0 +1,98 @@
+"""Protokolle und Verdrahtung der Pipeline.
+
+Die drei Stufen sind über ``Protocol`` entkoppelt und einzeln austauschbar.
+In v1.1 werden hier ``MlxTranscriber``, ``OllamaRefiner`` und
+``ClipboardInjector`` eingehängt — die Verdrahtung bleibt unverändert.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol, runtime_checkable
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TranscriptionResult:
+    text: str
+    language: str | None = None
+    seconds: float = 0.0
+
+
+@runtime_checkable
+class Transcriber(Protocol):
+    """Audio → Rohtext."""
+
+    def warmup(self) -> None:
+        """Modell vorladen. Wird beim Start aufgerufen, nicht beim ersten Hotkey."""
+
+    def transcribe(self, audio_path: Path) -> TranscriptionResult: ...
+
+
+@runtime_checkable
+class Refiner(Protocol):
+    """Rohtext → aufbereiteter Text. Darf niemals blockieren oder werfen."""
+
+    def refine(self, text: str) -> str: ...
+
+
+@runtime_checkable
+class Injector(Protocol):
+    """Text → Zielanwendung."""
+
+    def inject(self, text: str) -> None: ...
+
+
+class Pipeline:
+    """Führt die Stufen aus und schützt jede einzeln gegen Fehler.
+
+    Grundsatz: Scheitert die Verfeinerung, wird trotzdem das Rohtranskript
+    ausgegeben. Nur ein Fehlschlag der Transkription bricht ab.
+    """
+
+    def __init__(
+        self,
+        transcriber: Transcriber,
+        refiner: Refiner | None = None,
+        injector: Injector | None = None,
+    ) -> None:
+        self.transcriber = transcriber
+        self.refiner = refiner
+        self.injector = injector
+
+    def warmup(self) -> None:
+        try:
+            self.transcriber.warmup()
+        except Exception:
+            log.exception("Warmup der Transkription fehlgeschlagen — erster Lauf wird langsam.")
+
+    def run(self, audio_path: Path) -> str:
+        started = time.perf_counter()
+        result = self.transcriber.transcribe(audio_path)
+        text = result.text.strip()
+        log.info(
+            "Transkribiert in %.2fs: %r",
+            time.perf_counter() - started,
+            text[:120] + ("…" if len(text) > 120 else ""),
+        )
+        if not text:
+            log.warning("Leeres Transkript — nichts auszugeben.")
+            return ""
+
+        if self.refiner is not None:
+            try:
+                refined = self.refiner.refine(text)
+                if refined.strip():
+                    text = refined.strip()
+            except Exception:
+                log.exception("Verfeinerung fehlgeschlagen — nutze das Rohtranskript.")
+
+        if self.injector is not None:
+            self.injector.inject(text)
+
+        log.info("Fertig in %.2fs.", time.perf_counter() - started)
+        return text

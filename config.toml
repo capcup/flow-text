@@ -1,0 +1,53 @@
+# FlowText — Konfiguration
+#
+# Persönliche Overrides gehören in config.local.toml (nicht im Git).
+# Alle Werte sind optional; fehlende Schlüssel nutzen die Defaults.
+
+[hotkey]
+# "double_tap" (Standard) oder "combo".
+#
+# WARNUNG zu "combo": <ctrl>+<alt>+<space> ist ein macOS-Systemkurzbefehl
+# ("nächste Eingabequelle"). Er wechselt die Tastaturbelegung und tippt wegen
+# Option+Space ein geschütztes Leerzeichen (U+00A0) ins fokussierte Textfeld.
+# Nicht verwenden.
+mode = "double_tap"
+
+# Doppel-Tap: seitenspezifische Namen (alt_r, alt_l, cmd_r, ctrl_r, shift_r).
+tap_key = "alt_r"
+double_tap_window = 0.35   # max. Abstand zwischen den beiden Taps (s)
+max_tap_duration = 0.30    # länger gehalten = kein Tap
+
+# Nur relevant für mode = "combo".
+combo = "<ctrl>+<shift>+d"
+
+max_restarts = 5
+
+[audio]
+sample_rate = 16000        # Whisper erwartet 16 kHz
+channels = 1               # Mono
+blocksize = 1024
+# device = "MacBook Pro-Mikrofon"   # leer lassen = Systemstandard
+max_seconds = 300.0        # harte Obergrenze, danach automatischer Stopp
+min_seconds = 0.3          # kürzere Aufnahmen gelten als Fehlbedienung
+delete_after_use = true
+
+[pipeline]
+# "stub" = nur protokollieren (Phase 3). "mlx" = mlx-whisper (ab v1.1).
+transcriber = "stub"
+whisper_model = "mlx-community/whisper-large-v3-turbo"
+language = "de"
+
+# "none" oder "ollama"
+refiner = "none"
+ollama_model = "qwen2.5:7b"
+ollama_timeout = 20.0
+
+# "none" (nur Log) oder "clipboard" (Zwischenablage + Cmd+V)
+injector = "none"
+
+[feedback]
+sound = true
+
+[logging]
+level = "INFO"
+to_file = true
