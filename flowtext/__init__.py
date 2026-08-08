@@ -1,3 +1,3 @@
 """FlowText — lokale Voice-to-Text-Engine für macOS (Apple Silicon)."""
 
-__version__ = "1.5.1"
+__version__ = "1.5.2"

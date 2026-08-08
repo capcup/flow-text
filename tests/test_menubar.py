@@ -271,3 +271,122 @@ def test_available_false_without_rumps(monkeypatch) -> None:
     monkeypatch.delitem(sys.modules, "rumps", raising=False)
     monkeypatch.setattr(menubar.importlib.util, "find_spec", lambda name: None)
     assert menubar.available() is False
+
+
+# ------------------------------------------------------- Berechtigungen im Menü
+
+
+class TestPermissionState:
+    """Regression: eine frisch gebaute FlowText.app hat noch keine Rechte.
+
+    Beendet sie sich deswegen, kann sie die Berechtigung nie anfordern —
+    und es erscheint nie ein Icon. Sie muss also starten und den Zustand
+    anzeigen.
+    """
+
+    def _with_permissions(self, monkeypatch, ok: bool) -> None:
+        from flowtext.permissions import HIDAccess, Permissions
+
+        state = Permissions(
+            accessibility=ok,
+            input_monitoring=HIDAccess.GRANTED if ok else HIDAccess.DENIED,
+        )
+        monkeypatch.setattr(menubar.permissions, "check", lambda: state)
+
+    def test_locked_icon_wins_over_every_state(self) -> None:
+        for state in State:
+            assert menubar.icon_for(state, paused=False, permissions_ok=False) == (
+                menubar.LOCKED_ICON
+            )
+            assert menubar.icon_for(state, paused=True, permissions_ok=False) == (
+                menubar.LOCKED_ICON
+            )
+            assert (
+                menubar.label_for(state, paused=True, permissions_ok=False)
+                == "Berechtigungen fehlen"
+            )
+
+    def test_starts_and_shows_the_lock(self, rumps_module, monkeypatch, tmp_path) -> None:
+        from flowtext import app as app_module
+
+        monkeypatch.setattr(app_module, "temp_dir", lambda: tmp_path / "tmp")
+        self._with_permissions(monkeypatch, ok=False)
+
+        cfg = Config()
+        cfg.feedback.sound = False
+        flow = FlowTextApp(
+            cfg,
+            recorder=FakeRecorder(),  # type: ignore[arg-type]
+            hotkey=FakeHotkey(),  # type: ignore[arg-type]
+            pipeline=FakePipeline(),  # type: ignore[arg-type]
+        )
+        menu = menubar.MenubarApp(cfg, flow)
+        menu.run()  # darf NICHT vorher abbrechen
+        assert menu._ui.title == menubar.LOCKED_ICON
+        assert menu._items["status"].title == "Berechtigungen fehlen"
+
+    def test_lock_disappears_once_granted(self, rumps_module, monkeypatch, tmp_path) -> None:
+        from flowtext import app as app_module
+
+        monkeypatch.setattr(app_module, "temp_dir", lambda: tmp_path / "tmp")
+        self._with_permissions(monkeypatch, ok=False)
+
+        cfg = Config()
+        cfg.feedback.sound = False
+        flow = FlowTextApp(
+            cfg,
+            recorder=FakeRecorder(),  # type: ignore[arg-type]
+            hotkey=FakeHotkey(),  # type: ignore[arg-type]
+            pipeline=FakePipeline(),  # type: ignore[arg-type]
+        )
+        menu = menubar.MenubarApp(cfg, flow)
+        menu.run()
+        timer = FakeTimer.instances[-1]
+
+        self._with_permissions(monkeypatch, ok=True)
+        for _ in range(menubar.PERMISSION_RECHECK_TICKS):
+            timer.tick()
+        assert menu._ui.title == "🎙"
+
+    def test_menu_offers_both_settings_panes(self, menu) -> None:
+        menu.run()
+        titles = [item.title for item in menu._ui.menu if item is not None]
+        assert any("Bedienungshilfen" in t for t in titles)
+        assert any("Eingabeüberwachung" in t for t in titles)
+
+    def test_settings_links_target_the_privacy_panes(self, menu, monkeypatch) -> None:
+        opened: list[str] = []
+        monkeypatch.setattr(menubar, "_open", opened.append)
+        menu.run()
+        menu._open_accessibility(None)
+        menu._open_input_monitoring(None)
+        assert "Privacy_Accessibility" in opened[0]
+        assert "Privacy_ListenEvent" in opened[1]
+
+
+def test_menubar_does_not_block_on_the_model(rumps_module, monkeypatch, tmp_path) -> None:
+    """Regression: lud start() das Modell synchron, erschien das Icon erst
+    danach — beim ersten Start also erst nach dem kompletten Download."""
+    import threading
+
+    from flowtext import app as app_module
+
+    monkeypatch.setattr(app_module, "temp_dir", lambda: tmp_path / "tmp")
+    blocked = threading.Event()
+
+    class SlowPipeline(FakePipeline):
+        def warmup(self) -> None:
+            blocked.wait(5.0)
+
+    cfg = Config()
+    cfg.feedback.sound = False
+    flow = FlowTextApp(
+        cfg,
+        recorder=FakeRecorder(),  # type: ignore[arg-type]
+        hotkey=FakeHotkey(),  # type: ignore[arg-type]
+        pipeline=SlowPipeline(),  # type: ignore[arg-type]
+    )
+    menu = menubar.MenubarApp(cfg, flow)
+    menu.run()  # würde ohne den Fix 5 s hängen
+    assert menu._ui.ran
+    blocked.set()

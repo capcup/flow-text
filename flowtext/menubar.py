@@ -23,6 +23,7 @@ import subprocess
 import sys
 from typing import Any
 
+from . import permissions
 from .app import FlowTextApp
 from .config import Config, candidate_paths, log_dir
 from .state import State
@@ -39,12 +40,29 @@ ICONS: dict[State, str] = {
 }
 PAUSED_ICON = "⏸"
 
+#: Fehlende Berechtigungen haben Vorrang vor allem anderen — ohne sie kann
+#: der Auslöser gar nicht funktionieren.
+LOCKED_ICON = "🔒"
+
 LABELS: dict[State, str] = {
     State.IDLE: "Bereit",
     State.RECORDING: "Nimmt auf …",
     State.PROCESSING: "Verarbeitet …",
     State.ERROR: "Fehler — siehe Log",
 }
+
+#: Direktlinks in die Systemeinstellungen.
+SETTINGS_URLS = {
+    "Bedienungshilfen": (
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    ),
+    "Eingabeüberwachung": (
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+    ),
+}
+
+#: Solange Rechte fehlen, wird alle N Ticks nachgesehen. 200 ms × 10 = 2 s.
+PERMISSION_RECHECK_TICKS = 10
 
 #: Wie oft die Oberfläche den Zustand abholt. 0,2 s ist unauffällig und
 #: kostet praktisch nichts.
@@ -61,11 +79,15 @@ def available() -> bool:
         return False
 
 
-def icon_for(state: State, paused: bool) -> str:
+def icon_for(state: State, paused: bool, permissions_ok: bool = True) -> str:
+    if not permissions_ok:
+        return LOCKED_ICON
     return PAUSED_ICON if paused else ICONS.get(state, ICONS[State.IDLE])
 
 
-def label_for(state: State, paused: bool) -> str:
+def label_for(state: State, paused: bool, permissions_ok: bool = True) -> str:
+    if not permissions_ok:
+        return "Berechtigungen fehlen"
     if paused:
         return "Pausiert"
     return LABELS.get(state, str(state))
@@ -88,6 +110,8 @@ class MenubarApp:
         self._state = State.IDLE
         self._ui: Any = None
         self._items: dict[str, Any] = {}
+        self._permissions_ok = permissions.check().ok
+        self._ticks = 0
         # Läuft im Controller-Thread: NUR schreiben, kein Cocoa-Zugriff.
         app.state.subscribe(self._remember_state)
 
@@ -99,12 +123,13 @@ class MenubarApp:
 
         self._ui = rumps.App(
             "FlowText",
-            title=icon_for(self._state, self.app.paused),
+            title=icon_for(self._state, self.app.paused, self._permissions_ok),
             quit_button=None,
         )
         self._build_menu(rumps)
 
-        self.app.start()
+        # Modell nebenher laden, damit das Icon sofort erscheint.
+        self.app.start(background_warmup=True)
         rumps.Timer(self._tick, TICK_SECONDS).start()
         try:
             self._ui.run()
@@ -114,7 +139,7 @@ class MenubarApp:
     # ------------------------------------------------------------- Aufbau
 
     def _build_menu(self, rumps: Any) -> None:
-        status = rumps.MenuItem(label_for(self._state, self.app.paused))
+        status = rumps.MenuItem(label_for(self._state, self.app.paused, self._permissions_ok))
         status.set_callback(None)  # reine Anzeige
         trigger = rumps.MenuItem(f"Auslöser: {self.app.hotkey.describe()}")
         trigger.set_callback(None)
@@ -128,6 +153,9 @@ class MenubarApp:
             trigger,
             None,
             self._items["pause"],
+            None,
+            rumps.MenuItem("Bedienungshilfen freigeben …", callback=self._open_accessibility),
+            rumps.MenuItem("Eingabeüberwachung freigeben …", callback=self._open_input_monitoring),
             None,
             rumps.MenuItem("Konfiguration öffnen …", callback=self._open_config),
             rumps.MenuItem("Logdatei öffnen …", callback=self._open_log),
@@ -143,13 +171,27 @@ class MenubarApp:
 
     def _tick(self, _timer: Any) -> None:
         """Läuft im Hauptthread; nur hier wird die Oberfläche angefasst."""
+        self._ticks += 1
+        if not self._permissions_ok and self._ticks % PERMISSION_RECHECK_TICKS == 0:
+            # Erst nachsehen, wenn etwas fehlt: sobald der Nutzer die Freigabe
+            # erteilt, soll das Schloss ohne Neustart verschwinden.
+            self._permissions_ok = permissions.check().ok
+            if self._permissions_ok:
+                log.info("Berechtigungen sind jetzt erteilt.")
+
         paused = self.app.paused
-        self._ui.title = icon_for(self._state, paused)
-        self._items["status"].title = label_for(self._state, paused)
+        self._ui.title = icon_for(self._state, paused, self._permissions_ok)
+        self._items["status"].title = label_for(self._state, paused, self._permissions_ok)
         self._items["pause"].title = "Fortsetzen" if paused else "Pausieren"
 
     def _toggle_pause(self, _sender: Any) -> None:
         self.app.set_paused(not self.app.paused)
+
+    def _open_accessibility(self, _sender: Any) -> None:
+        _open(SETTINGS_URLS["Bedienungshilfen"])
+
+    def _open_input_monitoring(self, _sender: Any) -> None:
+        _open(SETTINGS_URLS["Eingabeüberwachung"])
 
     def _open_config(self, _sender: Any) -> None:
         path = self.cfg.source if self.cfg.source != "defaults" else None

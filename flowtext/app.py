@@ -59,17 +59,25 @@ class FlowTextApp:
 
     # ------------------------------------------------------------------ API
 
-    def start(self) -> None:
+    def start(self, *, background_warmup: bool = False) -> None:
         """Startet alle Threads und kehrt sofort zurück.
 
         Getrennt von :meth:`run`, weil die Menüleisten-Variante den
         Hauptthread für Cocoa braucht und nicht blockiert werden darf.
+
+        ``background_warmup`` lädt das Whisper-Modell nebenher. Für die
+        Menüleiste ist das entscheidend: sonst erscheint das Icon erst nach
+        dem Laden — beim allerersten Start also erst nach dem kompletten
+        Modell-Download, ohne jedes sichtbare Lebenszeichen.
         """
         if self._threads:
             raise RuntimeError("FlowText läuft bereits")
 
         self._cleanup_temp()
-        self.pipeline.warmup()
+        if background_warmup:
+            threading.Thread(target=self._warmup, name="pipeline-warmup", daemon=True).start()
+        else:
+            self._warmup()
 
         self._threads = [
             threading.Thread(target=self._controller_loop, name="controller", daemon=True),
@@ -89,6 +97,12 @@ class FlowTextApp:
                 pass
         finally:
             self.shutdown()
+
+    def _warmup(self) -> None:
+        try:
+            self.pipeline.warmup()
+        except Exception:
+            log.exception("Warmup fehlgeschlagen — das erste Diktat wird langsam.")
 
     def request_stop(self) -> None:
         """Signalsicher: setzt nur ein Event, kein Logging, keine I/O."""

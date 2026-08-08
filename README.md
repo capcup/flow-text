@@ -116,6 +116,7 @@ The icon shows you what FlowText is doing at a glance:
 | 🔴 | Recording |
 | ⏳ | Transcribing |
 | ⏸ | Paused |
+| 🔒 | Permissions missing — use the menu to grant them |
 | ⚠️ | Error — check the log |
 
 Click the icon for: pause/resume, open `config.toml`, open the log file, quit.
@@ -134,7 +135,12 @@ python tools/make_app.py     # creates dist/FlowText.app
 open dist/FlowText.app
 ```
 
-macOS will now ask for **Accessibility** and **Input Monitoring** for *FlowText itself*.
+The menu bar icon appears right away. On a fresh app it shows **🔒 "Berechtigungen
+fehlen"** — that's expected: a brand-new app has no permissions yet. Use the menu
+entries **"Bedienungshilfen freigeben …"** and **"Eingabeüberwachung freigeben …"** to
+jump straight to the right settings pane, then add `FlowText.app` there. The lock
+disappears within a couple of seconds — no restart needed.
+
 Once it works, go back to **System Settings → Privacy & Security** and switch those
 permissions **off for your Terminal**. FlowText keeps working — your Terminal no longer
 has access to your keystrokes.
@@ -241,7 +247,7 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 
 ## 🧪 Developer Testing & Verification
 
-FlowText comes with a comprehensive test suite of 204 automated tests that run without requiring real microphone input or active macOS GUI permissions:
+FlowText comes with a comprehensive test suite of 210 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
 # Run test suite

@@ -92,8 +92,17 @@ def main(argv: list[str] | None = None) -> int:
     perms = permissions.check()
     log.info(perms.summary())
     if not perms.ok and not args.skip_permission_check:
-        sys.stderr.write("\n" + permissions.help_text() + "\n")
-        return 2
+        # In der Menüleisten-Variante darf das kein Abbruch sein: eine frisch
+        # gebaute FlowText.app hat noch keine Rechte und könnte sie nie
+        # anfordern, wenn sie sich vorher beendet. Sie startet also, zeigt 🔒
+        # und bietet im Menü den direkten Weg in die Systemeinstellungen.
+        # macOS fragt zusätzlich von selbst, sobald der Event-Tap entsteht.
+        if not args.menubar:
+            sys.stderr.write("\n" + permissions.help_text() + "\n")
+            return 2
+        log.warning("Berechtigungen fehlen — FlowText startet trotzdem und zeigt 🔒.")
+        for line in permissions.help_text().splitlines():
+            log.warning("%s", line)
     if perms.input_monitoring is permissions.HIDAccess.UNKNOWN:
         # UNKNOWN = macOS hat noch nie gefragt. Der Systemdialog erscheint beim
         # ersten Tap-Versuch; wird er weggeklickt, bleibt der Tap für immer
