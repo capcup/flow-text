@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from flowtext.config import Config, ConfigError, load, validate
+from flowtext.config import Config, ConfigError, conflicts, load, validate
 
 
 def _write(tmp_path: Path, content: str) -> Path:
@@ -22,6 +22,61 @@ def test_default_hotkey_is_not_the_macos_system_shortcut() -> None:
     cfg = Config()
     assert cfg.hotkey.mode == "double_tap"
     assert "<alt>" not in cfg.hotkey.combo or "<space>" not in cfg.hotkey.combo
+
+
+def test_default_trigger_is_conflict_free() -> None:
+    """Regression: Doppel-Tap Option ist von Claude für Mac belegt."""
+    cfg = Config()
+    assert cfg.hotkey.tap_key == "cmd"
+    assert conflicts(cfg) == []
+
+
+class TestConflicts:
+    def test_option_double_tap_warns_about_claude(self) -> None:
+        cfg = Config()
+        cfg.hotkey.tap_key = "alt_r"
+        found = conflicts(cfg)
+        assert len(found) == 1
+        assert "Claude" in found[0]
+
+    def test_left_option_warns_too(self) -> None:
+        cfg = Config()
+        cfg.hotkey.tap_key = "alt_l"
+        assert conflicts(cfg)
+
+    @pytest.mark.parametrize(
+        ("combo", "expected"),
+        [
+            ("<ctrl>+<alt>+<space>", "Eingabequelle"),
+            ("<ctrl>+<space>", "Eingabequelle"),
+            ("<cmd>+<space>", "Spotlight"),
+        ],
+    )
+    def test_reserved_combos_warn(self, combo: str, expected: str) -> None:
+        cfg = Config()
+        cfg.hotkey.mode = "combo"
+        cfg.hotkey.combo = combo
+        found = conflicts(cfg)
+        assert len(found) == 1
+        assert expected in found[0]
+
+    def test_free_combo_does_not_warn(self) -> None:
+        cfg = Config()
+        cfg.hotkey.mode = "combo"
+        cfg.hotkey.combo = "<ctrl>+<shift>+d"
+        assert conflicts(cfg) == []
+
+    def test_tap_key_conflict_ignored_in_combo_mode(self) -> None:
+        cfg = Config()
+        cfg.hotkey.mode = "combo"
+        cfg.hotkey.tap_key = "alt_r"
+        assert conflicts(cfg) == []
+
+    def test_invalid_combo_does_not_crash(self) -> None:
+        cfg = Config()
+        cfg.hotkey.mode = "combo"
+        cfg.hotkey.combo = "<ctrl>+<alt>"  # nur Modifier -> parse wirft
+        assert conflicts(cfg) == []
 
 
 def test_loads_toml(tmp_path: Path) -> None:
@@ -76,3 +131,34 @@ def test_validation_catches_bad_values(mutate) -> None:
     mutate(cfg)
     with pytest.raises(ConfigError):
         validate(cfg)
+
+
+class TestPipelineValidation:
+    """Nicht implementierte Stufen sollen laut scheitern, nicht still auf den
+    Stub zurückfallen — sonst wundert man sich über leere Transkripte."""
+
+    def test_default_pipeline_is_valid(self) -> None:
+        validate(Config())
+
+    @pytest.mark.parametrize(
+        ("field", "value", "hint"),
+        [
+            ("transcriber", "mlx", "mlx-whisper"),
+            ("refiner", "ollama", "Ollama"),
+            ("injector", "clipboard", "Clipboard"),
+        ],
+    )
+    def test_planned_stages_are_rejected_with_a_hint(
+        self, field: str, value: str, hint: str
+    ) -> None:
+        cfg = Config()
+        setattr(cfg.pipeline, field, value)
+        with pytest.raises(ConfigError, match=r"v1\.2") as excinfo:
+            validate(cfg)
+        assert hint in str(excinfo.value)
+
+    def test_unknown_stage_is_rejected(self) -> None:
+        cfg = Config()
+        cfg.pipeline.transcriber = "quatsch"
+        with pytest.raises(ConfigError, match="unbekannt"):
+            validate(cfg)

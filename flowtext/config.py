@@ -45,15 +45,18 @@ class HotkeyConfig:
     #: ``"double_tap"`` (Standard) oder ``"combo"``
     mode: str = "double_tap"
 
-    #: Nur für ``mode = "double_tap"``. Seitenspezifische Namen wie
-    #: ``alt_r``, ``alt_l``, ``cmd_r``, ``ctrl_r``, ``shift_r``.
-    tap_key: str = "alt_r"
+    #: Nur für ``mode = "double_tap"``.
+    #: Generische Namen wie ``cmd``, ``shift``, ``ctrl`` akzeptieren BEIDE Seiten (links/rechts).
+    #: Seitenspezifisch: ``cmd_r``, ``shift_r``, ``ctrl_r``, ``alt_l``.
+    tap_key: str = "cmd"
 
-    #: Maximaler Abstand zwischen zwei Taps (Sekunden).
-    double_tap_window: float = 0.35
+    #: Maximaler Abstand zwischen zwei Taps (Sekunden). Bewusst großzügig:
+    #: ein bewusst ausgeführter Doppel-Tap ist deutlich langsamer als ein
+    #: Doppelklick. Ein zu enges Fenster fühlt sich an wie "tut gar nichts".
+    double_tap_window: float = 0.50
 
     #: Länger gehalten als das = kein Tap, sondern ein Modifier-Griff.
-    max_tap_duration: float = 0.30
+    max_tap_duration: float = 0.45
 
     #: Nur für ``mode = "combo"``.
     #: ACHTUNG: ``<ctrl>+<alt>+<space>`` ist ein macOS-Systemkurzbefehl
@@ -83,14 +86,28 @@ class AudioConfig:
     delete_after_use: bool = True
 
 
+#: Bereits implementierte Pipeline-Stufen. Die restlichen Werte sind für v1.2
+#: vorgesehen und werden beim Start mit einem Hinweis abgelehnt, statt
+#: stillschweigend auf den Stub zurückzufallen.
+IMPLEMENTED_TRANSCRIBERS = frozenset({"stub"})
+IMPLEMENTED_REFINERS = frozenset({"none"})
+IMPLEMENTED_INJECTORS = frozenset({"none"})
+
+_PLANNED = {
+    "transcriber": {"mlx": "mlx-whisper"},
+    "refiner": {"ollama": "Ollama-Nachbearbeitung"},
+    "injector": {"clipboard": "Clipboard + Cmd+V"},
+}
+
+
 @dataclass
 class PipelineConfig:
-    #: ``"stub"`` (nur loggen) oder ``"mlx"`` (ab v1.1 mit mlx-whisper).
+    #: Derzeit nur ``"stub"``. ``"mlx"`` folgt in v1.2.
     transcriber: str = "stub"
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
     language: str = "de"
 
-    #: ``"none"`` oder ``"ollama"``.
+    #: Derzeit nur ``"none"``. ``"ollama"`` folgt in v1.2.
     refiner: str = "none"
     ollama_model: str = "qwen2.5:7b"
     ollama_timeout: float = 20.0
@@ -100,7 +117,7 @@ class PipelineConfig:
         "Ändere NICHT den Inhalt und antworte NUR mit dem korrigierten Text."
     )
 
-    #: ``"none"`` oder ``"clipboard"``.
+    #: Derzeit nur ``"none"``. ``"clipboard"`` folgt in v1.2.
     injector: str = "none"
 
 
@@ -138,6 +155,26 @@ class Config:
 
 class ConfigError(ValueError):
     """Ungültige Konfiguration."""
+
+
+#: Auslöser, die unter macOS bereits anderweitig belegt sind. Kein harter
+#: Fehler — wer den fremden Shortcut deaktiviert, darf sie verwenden.
+_CLAUDE = "Claude für Mac (Doppel-Tap Option öffnet die Schnelleingabe)"
+RESERVED_TAP_KEYS: dict[str, str] = {
+    "alt": _CLAUDE,
+    "alt_r": _CLAUDE,
+    "alt_l": _CLAUDE,
+    "option": _CLAUDE,
+}
+
+#: Kombinationen, die macOS selbst belegt.
+RESERVED_COMBOS: dict[frozenset[str], str] = {
+    frozenset({"ctrl", "alt", "space"}): "macOS: nächste Eingabequelle",
+    frozenset({"ctrl", "space"}): "macOS: vorherige Eingabequelle",
+    frozenset({"cmd", "space"}): "macOS: Spotlight",
+    frozenset({"cmd", "alt", "space"}): "macOS: Finder-Suchfenster",
+    frozenset({"cmd", "tab"}): "macOS: Programmumschalter",
+}
 
 
 def _apply(obj: Any, data: dict[str, Any], path: str) -> None:
@@ -198,3 +235,48 @@ def validate(cfg: Config) -> None:
         raise ConfigError("audio.min_seconds muss kleiner als audio.max_seconds sein")
     if cfg.audio.channels != 1:
         raise ConfigError("audio.channels muss 1 sein (Whisper erwartet Mono)")
+
+    for field_name, implemented in (
+        ("transcriber", IMPLEMENTED_TRANSCRIBERS),
+        ("refiner", IMPLEMENTED_REFINERS),
+        ("injector", IMPLEMENTED_INJECTORS),
+    ):
+        value = getattr(cfg.pipeline, field_name)
+        if value in implemented:
+            continue
+        planned = _PLANNED[field_name].get(value)
+        detail = (
+            f"ist für v1.2 geplant ({planned}) und noch nicht implementiert"
+            if planned
+            else "ist unbekannt"
+        )
+        raise ConfigError(
+            f"pipeline.{field_name} = {value!r} {detail}. "
+            f"Möglich: {', '.join(sorted(implemented))}."
+        )
+
+
+def conflicts(cfg: Config) -> list[str]:
+    """Weiche Warnungen: Auslöser, die anderweitig belegt sind.
+
+    Kein Fehler — die fremde Belegung lässt sich abschalten. Aber ohne
+    Hinweis sucht man den Fehler stundenlang im eigenen Code.
+    """
+    found: list[str] = []
+    if cfg.hotkey.mode == "double_tap":
+        owner = RESERVED_TAP_KEYS.get(cfg.hotkey.tap_key)
+        if owner:
+            found.append(
+                f"hotkey.tap_key = {cfg.hotkey.tap_key!r} ist bereits belegt durch: {owner}. "
+                "Empfehlung: cmd_r, shift_r oder ctrl_r."
+            )
+    else:
+        try:
+            from .hotkey.detectors import parse_combo
+
+            owner = RESERVED_COMBOS.get(parse_combo(cfg.hotkey.combo))
+        except ValueError:
+            owner = None
+        if owner:
+            found.append(f"hotkey.combo = {cfg.hotkey.combo!r} ist bereits belegt durch: {owner}.")
+    return found

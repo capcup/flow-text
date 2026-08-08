@@ -100,20 +100,89 @@ def check() -> Permissions:
     return Permissions(accessibility=accessibility, input_monitoring=hid)
 
 
-HELP_TEXT = """\
+_HELP_TEMPLATE = """\
 FlowText braucht zwei macOS-Berechtigungen — und zwar für die App, aus der es
-gestartet wurde (Terminal.app, iTerm2, VS Code, Cursor …), NICHT für das
-Python-Binary selbst.
+gestartet wurde, NICHT für das Python-Binary.
+
+Freizugebende App: {app}
 
   1) Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen
   2) Systemeinstellungen → Datenschutz & Sicherheit → Eingabeüberwachung
 
-Beide Schalter für die startende App aktivieren, danach die App mit Cmd+Q
-VOLLSTÄNDIG beenden (nicht nur das Fenster schließen) und neu starten.
+In BEIDEN Listen muss diese App stehen und der Schalter aktiv sein.
+Fehlt sie: "+" klicken, mit Cmd+Shift+G den Pfad oben eingeben, hinzufügen.
 
-Tipp: Zum Einrichten immer Terminal.app verwenden. Das IDE-Terminal von
-VS Code/Cursor braucht eine eigene Freigabe und verwirrt beim Debuggen.
+Danach die App mit Cmd+Q VOLLSTÄNDIG beenden (Fenster schließen genügt
+nicht) und neu starten.
+
+Hilft das nicht, die Einträge zurücksetzen und neu erteilen lassen:
+
+    tccutil reset Accessibility
+    tccutil reset ListenEvent
+
+Danach FlowText erneut starten und den Systemdialog bestätigen.
+
+Weitere Stolpersteine:
+  * Das IDE-Terminal (VS Code, Cursor) braucht eine EIGENE Freigabe.
+    Zum Einrichten Terminal.app verwenden.
+  * tmux, screen oder Wrapper wie "uv run" können die Zuordnung
+    verschieben — zum Testen direkt in einem frischen Terminal-Fenster
+    starten.
 """
+
+
+def help_text() -> str:
+    """Anleitung mit konkret benannter App statt allgemeiner Aufzählung."""
+    app = responsible_app() if sys.platform == "darwin" else None
+    return _HELP_TEMPLATE.format(
+        app=app or "nicht ermittelbar — Terminal.app, iTerm2, VS Code oder Cursor"
+    )
+
+
+def process_chain(max_depth: int = 12) -> list[tuple[int, str]]:
+    """Prozesskette von diesem Prozess aufwärts: ``[(pid, Kommando), …]``.
+
+    macOS vergibt TCC-Rechte an den *verantwortlichen* Prozess — also an die
+    App-Bundle-Vorfahren dieses Python-Prozesses, nicht an Python selbst.
+    """
+    import subprocess
+
+    chain: list[tuple[int, str]] = []
+    pid = os.getpid()
+    for _ in range(max_depth):
+        if pid <= 1:
+            break
+        try:
+            result = subprocess.run(
+                ["/bin/ps", "-o", "ppid=,command=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+            )
+        except (OSError, subprocess.SubprocessError):
+            break
+        line = result.stdout.strip()
+        if not line:
+            break
+        ppid_text, _, command = line.partition(" ")
+        chain.append((pid, command.strip()))
+        try:
+            pid = int(ppid_text)
+        except ValueError:
+            break
+    return chain
+
+
+def responsible_app() -> str | None:
+    """Das App-Bundle, das die Berechtigungen braucht — oder ``None``.
+
+    Genau dieser Pfad muss in Bedienungshilfen und Eingabeüberwachung stehen.
+    """
+    marker = ".app/Contents/MacOS/"
+    for _, command in process_chain():
+        if marker in command:
+            return command.split(".app/", 1)[0] + ".app"
+    return None
 
 
 def environment_report() -> str:
@@ -134,6 +203,6 @@ def require() -> Permissions:
     """Prüft die Berechtigungen und beendet den Prozess bei Verweigerung."""
     perms = check()
     if not perms.ok:
-        sys.stderr.write("\n" + perms.summary() + "\n\n" + HELP_TEXT + "\n")
+        sys.stderr.write("\n" + perms.summary() + "\n\n" + help_text() + "\n")
         raise SystemExit(2)
     return perms

@@ -14,12 +14,18 @@ Warum eine eigene Tabelle statt ``key.name``?
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
-try:  # pragma: no cover — auf Nicht-macOS/CI ggf. nicht installiert
-    from pynput import keyboard
-except Exception:  # noqa: BLE001
-    keyboard = None  # type: ignore[assignment]
+#: pynput ist auf Nicht-macOS/CI evtl. nicht installierbar. Die
+#: Namenstabelle bleibt dann leer; ``normalize`` fällt auf die
+#: vk-/char-/name-Pfade zurück und bleibt damit voll testbar.
+try:  # pragma: no cover
+    from pynput import keyboard as _keyboard
+except Exception:  # noqa: BLE001 — pyobjc kann auf jede erdenkliche Art scheitern
+    _keyboard = None
+
+keyboard: Any = _keyboard
 
 
 #: (pynput-Attributname, kanonischer Name). Reihenfolge zählt: bei
@@ -62,6 +68,37 @@ _SPECIAL_NAMES: tuple[tuple[str, str], ...] = (
 _SPACE_CHARS = frozenset({" ", "\xa0", "\u202f", "\x00"})
 
 
+#: macOS Virtual-Key-Codes (``<HIToolbox/Events.h>``) für Tasten, bei denen die
+#: Seite zählt. Der vk kommt direkt aus dem CGEvent und ist damit die
+#: verlässlichste Quelle — unabhängig davon, wie pynput seine Key-Enum
+#: aufbaut (``Key.cmd_l`` ist dort z. B. ein Alias von ``Key.cmd``).
+_DARWIN_VK_NAMES: dict[int, str] = {
+    0x37: "cmd_l",
+    0x36: "cmd_r",
+    0x3A: "alt_l",
+    0x3D: "alt_r",
+    0x3B: "ctrl_l",
+    0x3E: "ctrl_r",
+    0x38: "shift_l",
+    0x3C: "shift_r",
+    0x39: "caps_lock",
+    0x3F: "fn",
+    0x31: "space",
+    0x24: "enter",
+    0x30: "tab",
+    0x35: "esc",
+}
+
+
+def _vk_of(key: Any) -> int | None:
+    """Virtual-Key-Code aus ``Key``-Enum-Member oder ``KeyCode`` ziehen."""
+    value = getattr(key, "value", None)  # Key-Enum-Member → KeyCode
+    vk = getattr(value, "vk", None)
+    if vk is None:
+        vk = getattr(key, "vk", None)
+    return int(vk) if isinstance(vk, int) else None
+
+
 def _build_table() -> dict[Any, str]:
     if keyboard is None:
         return {}
@@ -78,6 +115,13 @@ _TABLE: dict[Any, str] = _build_table()
 
 def normalize(key: Any) -> str | None:
     """pynput-Key → kanonischer Name, oder ``None`` wenn unbrauchbar."""
+    if sys.platform == "darwin":
+        vk = _vk_of(key)
+        if vk is not None:
+            name = _DARWIN_VK_NAMES.get(vk)
+            if name is not None:
+                return name
+
     name = _TABLE.get(key)
     if name is not None:
         return name
@@ -86,7 +130,7 @@ def normalize(key: Any) -> str | None:
     if char:
         if char in _SPACE_CHARS:
             return "space"
-        return char.lower()
+        return str(char).lower()
 
     # Key-Enum ohne Tabelleneintrag (z. B. Medientasten).
     raw_name = getattr(key, "name", None)

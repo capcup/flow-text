@@ -1,6 +1,6 @@
 [project]
 name = "flowtext"
-version = "1.1.0"
+version = "1.2.0"
 description = "Lokale Voice-to-Text-Engine für macOS (Apple Silicon)"
 requires-python = ">=3.11"
 dependencies = [
@@ -51,12 +51,23 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
+# Zielplattform ist macOS; sonst hält mypy die darwin-Zweige für toten Code.
+platform = "darwin"
 strict = true
 warn_unreachable = true
+files = ["flowtext", "tools"]
+
 # Diese Pakete liefern keine Type-Stubs mit.
 [[tool.mypy.overrides]]
 module = ["sounddevice", "soundfile", "pynput.*", "mlx_whisper", "ollama", "pyperclip"]
 ignore_missing_imports = true
+
+# Tests dürfen pytest-Fixtures ohne Annotationen verwenden.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_unused_ignores = false
 
 # ---------------------------------------------------------------- pytest
 

@@ -9,7 +9,15 @@ import sys
 from pathlib import Path
 
 from . import __version__, permissions
-from .config import Config, ConfigError, candidate_paths, load, log_dir, temp_dir
+from .config import (
+    Config,
+    ConfigError,
+    candidate_paths,
+    conflicts,
+    load,
+    log_dir,
+    temp_dir,
+)
 from .logging_setup import setup as setup_logging
 
 
@@ -22,7 +30,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument("--hotkey-mode", choices=["double_tap", "combo"])
     parser.add_argument("--combo", help="Kombination, z. B. '<ctrl>+<shift>+d'")
-    parser.add_argument("--tap-key", help="Taste für Doppel-Tap, z. B. alt_r")
+    parser.add_argument("--tap-key", help="Taste für Doppel-Tap, z. B. cmd_r")
+    parser.add_argument(
+        "--watch-keys",
+        action="store_true",
+        help="Tastaturereignisse live anzeigen statt aufzunehmen (Diagnose)",
+    )
     parser.add_argument(
         "--skip-permission-check",
         action="store_true",
@@ -61,12 +74,30 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Konfiguration: %s", cfg.source)
     if cfg.source == "defaults":
         log.debug("Gesucht in: %s", ", ".join(str(p) for p in candidate_paths()))
+    for warning in conflicts(cfg):
+        log.warning("⚠️  %s", warning)
+
+    if args.watch_keys:
+        from . import diagnostics
+
+        diagnostics.report_environment()
+        diagnostics.report_permissions()
+        return 0 if diagnostics.watch_keys(cfg) else 1
 
     perms = permissions.check()
     log.info(perms.summary())
     if not perms.ok and not args.skip_permission_check:
-        sys.stderr.write("\n" + permissions.HELP_TEXT + "\n")
+        sys.stderr.write("\n" + permissions.help_text() + "\n")
         return 2
+    if perms.input_monitoring is permissions.HIDAccess.UNKNOWN:
+        # UNKNOWN = macOS hat noch nie gefragt. Der Systemdialog erscheint beim
+        # ersten Tap-Versuch; wird er weggeklickt, bleibt der Tap für immer
+        # stumm. Deshalb hier ausdrücklich warnen statt stillschweigend zu starten.
+        log.warning(
+            "Eingabeüberwachung ist noch nicht erteilt (Status: unbekannt). macOS "
+            "fragt gleich nach — der Dialog muss bestätigt werden, sonst bleibt "
+            "der Hotkey wirkungslos."
+        )
 
     temp_dir().mkdir(parents=True, exist_ok=True)
     log.debug("Temporäre Aufnahmen: %s | Logs: %s", temp_dir(), log_dir())

@@ -77,7 +77,10 @@
 - [x] Min-/Max-Aufnahmedauer, Geräte-Fehlerbehandlung, temporäre Dateien in Application Support
 - [x] Paketstruktur `flowtext/`, Zustandsautomat, `config.toml`
 - [x] Akustisches Feedback, rotierendes Logfile
-- [x] `tools/diagnose.py`, 76 automatisierte Tests, `ruff` + `mypy`
+- [x] `tools/diagnose.py`, automatisierte Tests, `ruff` + `mypy --strict`
+- [x] Konflikterkennung für belegte Auslöser (Claude für Mac, macOS-Systemkurzbefehle)
+- [x] Event-Watchdog + `--watch-keys`: fehlende Berechtigungen melden sich selbst
+- [x] Diagnose zentral in `flowtext/diagnostics.py`, benennt die freizugebende App
 
 ### Version 1.2 (MVP Step 2) - Next Iteration
 - [ ] Integration von `mlx-whisper` (Inferenz auf der temporären WAV-Datei)

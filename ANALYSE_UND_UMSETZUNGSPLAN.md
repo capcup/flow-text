@@ -5,6 +5,44 @@
 
 ---
 
+> ## Umsetzungsstand (08.08.2026) — v1.2
+>
+> **Phasen 0–3 sind umgesetzt, der Hotkey läuft.** Das Projekt liegt als Paket
+> `flowtext/` vor; 124 Tests, `ruff`, `ruff format` und `mypy --strict` sind grün.
+> Bedienung: siehe `README.md`.
+>
+> ### Nachtrag: was die Analyse noch nicht wusste
+>
+> Die Analyse empfahl **Doppel-Tap auf die rechte Option-Taste** (§2 U3, §7.5). Das ist
+> überholt: **Claude für Mac belegt Doppel-Tap Option systemweit** für seine
+> Schnelleingabe. Aktueller Default ist deshalb **Doppel-Tap Command** (beide Seiten).
+> `config.RESERVED_TAP_KEYS` und `RESERVED_COMBOS` führen die bekannten Kollisionen;
+> FlowText warnt beim Start, wenn ein belegter Auslöser konfiguriert ist.
+>
+> Zweite Erkenntnis aus der Praxis: die eigentliche Hürde war weder Auslöser noch Code,
+> sondern die **Eingabeüberwachung**. Sie äußert sich als vollkommene Stille. Dagegen
+> gibt es jetzt drei Stufen: `permissions.responsible_app()` benennt die freizugebende
+> App konkret, `--watch-keys` unterscheidet „keine Ereignisse" von „falscher Tastenname",
+> und ein Watchdog meldet sich von selbst, wenn 20 Sekunden lang nichts ankommt.
+>
+> | Ursache / Befund | Status | Wo behoben |
+> | :--- | :---: | :--- |
+> | U1 Blockierender Callback | ✅ | `flowtext/hotkey/service.py` — Callback macht nur Set-Logik + `put_nowait`, Dauer wird gemessen |
+> | U2 Stiller Listener-Tod | ✅ | `HotkeyService._supervise` — `join()` + Neustart mit Backoff |
+> | U3 Systemkurzbefehl-Kollision | ✅ | Default ist Doppel-Tap rechte Option (`DoubleTapDetector`) |
+> | U4 Falsche Permission-Prüfung | ✅ | `flowtext/permissions.py` — `restype=c_bool` + `IOHIDCheckAccess`, fail-loud |
+> | U5 TCC am falschen Prozess | ✅ | Interpreter-Report beim Start, Warnung in `tools/diagnose.py` |
+> | U6 Deadlock im Audio-Pfad | ✅ | `flowtext/audio/recorder.py` — Queue statt Lock, Regressionstest vorhanden |
+> | F8 `issubset` / Obermengen | ✅ | Exakter Modifier-Vergleich in `ComboDetector` |
+> | F9–F13, A1–A7, B1–B8 | ✅ | siehe Commits `v1.1` und `v1.2` |
+> | Fremd-Shortcut (Claude, macOS) | ✅ | `config.RESERVED_TAP_KEYS`, Warnung beim Start |
+> | Stille bei fehlender Berechtigung | ✅ | `responsible_app()`, `--watch-keys`, Event-Watchdog |
+> | Phase 4 (mlx-whisper, Ollama, Injektion) | ⬜ | offen — Pipeline ist als Stub eingehängt |
+>
+> Nächster Schritt: Phase 4 — siehe [§6](#6-umsetzungsplan-mit-akzeptanzkriterien).
+
+---
+
 ## Inhalt
 
 1. [Executive Summary & Bewertung](#1-executive-summary--bewertung)

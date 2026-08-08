@@ -2,8 +2,8 @@
 
 Lokale Voice-to-Text-Engine für macOS (Apple Silicon). 100 % offline — keine Daten verlassen den Mac.
 
-**Status:** v1.1 — Hotkey, Aufnahme und Architektur stehen. Die STT-/LLM-Pipeline ist als
-Stub eingehängt und wird in der nächsten Iteration aktiviert.
+**Status:** v1.2 — Hotkey, Aufnahme und Architektur stehen und laufen stabil. Die
+STT-/LLM-Pipeline ist als Stub eingehängt und wird in der nächsten Iteration aktiviert.
 
 ---
 
@@ -18,8 +18,12 @@ python tools/diagnose.py      # 1. Berechtigungen und Mikrofon prüfen
 python -m flowtext            # 2. starten
 ```
 
-**Auslöser:** rechte Option-Taste **zweimal antippen** — einmal zum Starten, einmal zum
-Stoppen der Aufnahme.
+**Auslöser:** Command-Taste **zweimal antippen** (links oder rechts) — einmal zum Starten,
+einmal zum Stoppen der Aufnahme.
+
+> **Warum nicht Option?** Claude für Mac belegt den Doppel-Tap auf Option bereits systemweit
+> für seine Schnelleingabe. FlowText warnt beim Start, wenn ein bekannt belegter Auslöser
+> konfiguriert ist. Wer Claudes Shortcut abschaltet, kann `tap_key = "alt_r"` verwenden.
 
 ---
 
@@ -54,8 +58,10 @@ Drei Regeln, die viel Zeit sparen:
 ```toml
 [hotkey]
 mode = "double_tap"       # oder "combo"
-tap_key = "alt_r"         # alt_r, alt_l, cmd_r, ctrl_r, shift_r
-double_tap_window = 0.35
+tap_key = "cmd"           # generisch: cmd, shift, ctrl (beide Seiten)
+                          # seitenspezifisch: cmd_r, shift_r, ctrl_r, alt_l
+double_tap_window = 0.50  # großzügig — zu eng fühlt sich an wie "tut nichts"
+max_tap_duration = 0.45
 
 [audio]
 max_seconds = 300.0
@@ -65,10 +71,24 @@ min_seconds = 0.3
 Häufige CLI-Overrides:
 
 ```bash
-python -m flowtext --log-level DEBUG
+python -m flowtext --watch-keys      # Diagnose: kommen überhaupt Events an?
+python -m flowtext --log-level DEBUG # loggt jeden Tastennamen live
 python -m flowtext --combo '<ctrl>+<shift>+d'
-python -m flowtext --tap-key cmd_r
+python -m flowtext --tap-key shift_r
 ```
+
+**Belegte Auslöser** (FlowText warnt beim Start):
+
+| Auslöser | Belegt durch |
+| :--- | :--- |
+| Doppel-Tap Option (links/rechts) | Claude für Mac — Schnelleingabe |
+| `<ctrl>+<alt>+<space>` | macOS — nächste Eingabequelle |
+| `<ctrl>+<space>` | macOS — vorherige Eingabequelle |
+| `<cmd>+<space>` | macOS — Spotlight |
+| `<cmd>+<alt>+<space>` | macOS — Finder-Suchfenster |
+
+Freie Empfehlungen: Doppel-Tap `cmd_r`, `shift_r` oder `ctrl_r`; als Kombination
+`<ctrl>+<shift>+d` oder `<f5>`.
 
 > **Nicht `<ctrl>+<alt>+<space>` verwenden.** Das ist der macOS-Systemkurzbefehl
 > „nächste Eingabequelle". Er wechselt die Tastaturbelegung und tippt wegen Option+Space
@@ -102,32 +122,41 @@ Deadlock. Puffer werden deshalb über eine Queue übergeben.
 flowtext/
 ├── __main__.py       CLI, Signal-Handling
 ├── app.py            Controller, Zustandsautomat, Thread-Orchestrierung
-├── config.py         Dataclasses + TOML
-├── permissions.py    AXIsProcessTrusted + IOHIDCheckAccess
+├── config.py         Dataclasses + TOML, Validierung, Shortcut-Konflikte
+├── permissions.py    AXIsProcessTrusted + IOHIDCheckAccess, verantwortliche App
+├── diagnostics.py    Umgebung, Berechtigungen, Mikrofon, Tastatur
 ├── state.py          State-Enum, StateMachine mit Observern
 ├── feedback.py       Systemsounds
 ├── hotkey/
 │   ├── detectors.py  reine Trigger-Logik (voll unit-getestet)
-│   ├── keynames.py   pynput-Key → stabiler Name
-│   └── service.py    Listener + Supervisor
+│   ├── keynames.py   pynput-Key → stabiler Name (über macOS-vk)
+│   └── service.py    Listener, Supervisor, Event-Watchdog
 ├── audio/
 │   ├── recorder.py   deadlockfreie Aufnahme
 │   └── devices.py    Geräteabfrage
 └── pipeline/
     ├── base.py       Protocols + Verdrahtung
     ├── factory.py    Aufbau aus der Konfiguration
-    └── stub.py       Platzhalter bis v1.1
+    └── stub.py       Platzhalter bis v1.2
 ```
+
+`tools/diagnose.py` und `--watch-keys` sind beide dünne Aufrufer von
+`flowtext.diagnostics` — die Diagnoselogik existiert nur einmal.
 
 ---
 
 ## Entwicklung
 
 ```bash
-pytest                  # 76 Tests, laufen ohne macOS
+pytest                  # 124 Tests, laufen ohne macOS
 ruff check . && ruff format --check .
-mypy flowtext
+mypy                    # strict, Zielplattform darwin
 ```
+
+Die Pipeline läuft derzeit im Stub-Betrieb: die Aufnahme wird protokolliert, aber
+nicht transkribiert. `transcriber = "mlx"`, `refiner = "ollama"` und
+`injector = "clipboard"` folgen in v1.2 und werden bis dahin beim Start mit einem
+Hinweis abgelehnt — statt still auf den Stub zurückzufallen.
 
 Die Trigger-Erkennung arbeitet auf normalisierten Tastennamen und expliziten Zeitstempeln
 statt auf pynput-Objekten — dadurch ist sie ohne Event-Tap testbar. Der `AudioRecorder`
@@ -139,11 +168,33 @@ nimmt eine austauschbare Stream-Fabrik, sodass die Tests ohne PortAudio auskomme
 
 | Symptom | Ursache | Abhilfe |
 | :--- | :--- | :--- |
-| Keine Reaktion, keine Meldung | Berechtigungen fehlen | `python tools/diagnose.py` |
+| Auslöser öffnet eine andere App | Shortcut ist belegt (z. B. Claude bei Doppel-Tap Option) | `tap_key` auf `cmd_r` oder `shift_r` ändern |
+| **Auslöser macht gar nichts** | siehe Kasten unten | `python -m flowtext --watch-keys` |
+| Doppel-Tap wird selten erkannt | zu langsam getippt | `double_tap_window` auf `0.6` erhöhen |
 | Funktioniert 1–2×, dann nicht mehr | Event-Tap wurde deaktiviert | Log auf „Hotkey-Callback brauchte … ms" prüfen |
 | Aufnahme startet, Datei ist stumm | Mikrofonberechtigung oder falsches Gerät | `audio.device` in der Konfiguration setzen |
 | Auslöser feuert versehentlich | Doppel-Tap-Fenster zu groß | `double_tap_window` auf 0.25 senken |
 | Auslöser feuert zu selten | Fenster zu klein | `double_tap_window` auf 0.45 erhöhen |
+
+### „Der Auslöser macht gar nichts"
+
+Erst die entscheidende Frage klären — kommen überhaupt Tastaturereignisse an?
+
+```bash
+python -m flowtext --watch-keys
+```
+
+- **`Ereignisse gesamt: 0`** → der Event-Tap liefert nichts. Das ist immer eine
+  Berechtigung, nie der Auslöser. Bedienungshilfen **und** Eingabeüberwachung für
+  die startende App setzen, dann `Cmd+Q` und neu starten.
+- **Ereignisse > 0, Auslösungen 0** → Events kommen an, aber der Name passt nicht.
+  Mit `--log-level DEBUG` ablesen, welchen Namen deine Taste bekommt, und
+  `hotkey.tap_key` entsprechend setzen.
+- **Auslösungen > 0** → der Hotkey ist in Ordnung, das Problem liegt weiter hinten
+  (Mikrofon, Pipeline). Ins Log schauen.
+
+Läuft FlowText normal und kommt in den ersten 20 Sekunden kein einziges Ereignis an,
+meldet sich der Watchdog von selbst mit derselben Anleitung.
 
 Logs: `~/Library/Logs/FlowText/flowtext.log`
 Temporäre Aufnahmen: `~/Library/Application Support/FlowText/tmp/` (werden nach der

@@ -23,10 +23,14 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from ..config import AudioConfig
 
 log = logging.getLogger(__name__)
+
+#: Mono-Audio als float32 — das Format, das Whisper erwartet.
+AudioArray = npt.NDArray[np.float32]
 
 
 class AudioError(RuntimeError):
@@ -35,7 +39,7 @@ class AudioError(RuntimeError):
 
 @dataclass(frozen=True)
 class Recording:
-    samples: np.ndarray
+    samples: AudioArray
     sample_rate: int
 
     @property
@@ -65,11 +69,11 @@ class AudioRecorder:
     ) -> None:
         self._cfg = cfg
         self._make_stream = stream_factory or _default_stream_factory
-        self._chunks: queue.Queue[np.ndarray] = queue.Queue()
+        self._chunks: queue.Queue[AudioArray] = queue.Queue()
         self._stream: Any = None
         self._started_at: float | None = None
         self._max_frames = int(cfg.sample_rate * cfg.max_seconds)
-        self._overflow_logged = False
+        self._overflows = 0
 
     # ------------------------------------------------------------------ API
 
@@ -91,7 +95,7 @@ class AudioRecorder:
             raise AudioError("Aufnahme läuft bereits")
 
         self._drain()
-        self._overflow_logged = False
+        self._overflows = 0
         try:
             stream = self._make_stream(
                 samplerate=self._cfg.sample_rate,
@@ -128,17 +132,24 @@ class AudioRecorder:
                 except Exception as exc:  # noqa: BLE001
                     log.warning("Fehler beim Schließen des Audio-Streams: %s", exc)
 
+        if self._overflows:
+            # Erst hier loggen: im Realtime-Callback wäre I/O ein Kunstfehler.
+            log.warning(
+                "%d Audio-Blöcke mit Statusflag (Overflow) — das System war unter Last.",
+                self._overflows,
+            )
+
         chunks = self._drain()
         if not chunks:
             log.warning("Keine Audiodaten erfasst — ist die Mikrofonberechtigung erteilt?")
             return None
 
-        samples = np.concatenate(chunks, axis=0).reshape(-1)
-        if len(samples) > self._max_frames:
+        merged: AudioArray = np.concatenate(chunks, axis=0).reshape(-1)
+        if len(merged) > self._max_frames:
             log.info("Aufnahme auf %.0fs gekürzt.", self._cfg.max_seconds)
-            samples = samples[: self._max_frames]
+            merged = merged[: self._max_frames]
 
-        recording = Recording(samples=samples, sample_rate=self._cfg.sample_rate)
+        recording = Recording(samples=merged, sample_rate=self._cfg.sample_rate)
         if recording.duration < self._cfg.min_seconds:
             log.info("Aufnahme mit %.2fs zu kurz — verworfen.", recording.duration)
             return None
@@ -167,12 +178,12 @@ class AudioRecorder:
 
     def _callback(self, indata: Any, frames: int, time_info: Any, status: Any) -> None:
         """Realtime-Thread: kein Lock, keine I/O, kein Logging im Normalfall."""
-        if status and not self._overflow_logged:
-            self._overflow_logged = True  # nur einmal, sonst flutet es das Log
+        if status:
+            self._overflows += 1  # nur zählen; geloggt wird in stop()
         self._chunks.put_nowait(np.asarray(indata).copy())
 
-    def _drain(self) -> list[np.ndarray]:
-        out: list[np.ndarray] = []
+    def _drain(self) -> list[AudioArray]:
+        out: list[AudioArray] = []
         while True:
             try:
                 out.append(self._chunks.get_nowait())

@@ -130,6 +130,15 @@ class TestDoubleTapDetector:
         det.on_press("alt_l", 0.10)
         assert det.on_release("alt_l", 0.15) is False
 
+    def test_generic_cmd_matches_both_left_and_right(self) -> None:
+        det = DoubleTapDetector("cmd")
+        # Tap cmd_l
+        det.on_press("cmd_l", 0.0)
+        det.on_release("cmd_l", 0.05)
+        # Tap cmd_r
+        det.on_press("cmd_r", 0.15)
+        assert det.on_release("cmd_r", 0.20) is True
+
     def test_invalid_window_rejected(self) -> None:
         with pytest.raises(HotkeyConfigError):
             DoubleTapDetector("alt_r", window=0.0)

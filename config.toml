@@ -12,10 +12,10 @@
 # Nicht verwenden.
 mode = "double_tap"
 
-# Doppel-Tap: seitenspezifische Namen (alt_r, alt_l, cmd_r, ctrl_r, shift_r).
-tap_key = "alt_r"
-double_tap_window = 0.35   # max. Abstand zwischen den beiden Taps (s)
-max_tap_duration = 0.30    # länger gehalten = kein Tap
+# Doppel-Tap: generisch (cmd, shift, ctrl) oder seitenspezifisch (cmd_r, shift_r, ctrl_r).
+tap_key = "cmd"
+double_tap_window = 0.50   # max. Abstand zwischen den beiden Taps (s)
+max_tap_duration = 0.45    # länger gehalten = kein Tap, sondern ein Modifier-Griff
 
 # Nur relevant für mode = "combo".
 combo = "<ctrl>+<shift>+d"
@@ -32,18 +32,19 @@ min_seconds = 0.3          # kürzere Aufnahmen gelten als Fehlbedienung
 delete_after_use = true
 
 [pipeline]
-# "stub" = nur protokollieren (Phase 3). "mlx" = mlx-whisper (ab v1.1).
-transcriber = "stub"
+# Derzeit ist nur der Stub-Betrieb implementiert: die Aufnahme wird
+# protokolliert, aber nicht transkribiert. Die Werte "mlx", "ollama" und
+# "clipboard" folgen in v1.2 und werden bis dahin beim Start mit einem
+# Hinweis abgelehnt — statt still auf den Stub zurückzufallen.
+transcriber = "stub"          # v1.2: "mlx"
+refiner = "none"              # v1.2: "ollama"
+injector = "none"             # v1.2: "clipboard"
+
+# Schon vorbereitet, aber erst ab v1.2 wirksam:
 whisper_model = "mlx-community/whisper-large-v3-turbo"
 language = "de"
-
-# "none" oder "ollama"
-refiner = "none"
 ollama_model = "qwen2.5:7b"
 ollama_timeout = 20.0
-
-# "none" (nur Log) oder "clipboard" (Zwischenablage + Cmd+V)
-injector = "none"
 
 [feedback]
 sound = true

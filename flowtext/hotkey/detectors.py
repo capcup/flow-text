@@ -4,9 +4,10 @@ Die Detektoren arbeiten ausschließlich auf normalisierten Tastennamen
 (``"alt_r"``, ``"space"``, ``"d"`` …) und expliziten Zeitstempeln. Dadurch
 sind sie vollständig unit-testbar, ohne macOS oder einen Event-Tap.
 
-Namenskonvention: Modifier sind IMMER seitenspezifisch (``alt_l`` / ``alt_r``).
-Der generische Name (``alt``) wird beim Matching zusätzlich abgeleitet, damit
-``<alt>`` in einer Kombination auf beide Seiten passt.
+Namenskonvention: eingehende Tastennamen sind IMMER seitenspezifisch
+(``alt_l`` / ``alt_r``). In der *Konfiguration* darf zusätzlich der
+generische Name stehen — ``cmd`` passt dann auf beide Command-Tasten,
+``cmd_r`` nur auf die rechte.
 """
 
 from __future__ import annotations
@@ -127,22 +128,26 @@ class ComboDetector:
 
 
 class DoubleTapDetector:
-    """Doppeltes Antippen einer einzelnen Taste (Standard: rechte Option).
+    """Doppeltes Antippen einer einzelnen Taste (Standard: Command).
 
-    Kollisionsfrei, weil ein einzelner Modifier nie ein Systemkurzbefehl ist —
-    im Gegensatz zu ``Ctrl+Option+Space`` ("nächste Eingabequelle").
+    Ein einzelner Modifier ist nie ein macOS-Systemkurzbefehl — anders als
+    ``Ctrl+Option+Space`` ("nächste Eingabequelle"). Andere Apps können den
+    Griff trotzdem belegen: Claude für Mac hört auf Doppel-Tap Option.
+    Bekannte Kollisionen stehen in ``config.RESERVED_TAP_KEYS``.
 
     Ein *Tap* ist ein Druck-Loslass-Paar kürzer als ``max_tap_duration``.
     Wird die Taste als Modifier benutzt (also eine andere Taste dazwischen
     gedrückt), verfällt die Sequenz. Ausgelöst wird beim Loslassen des
     zweiten Taps.
+
+    ``key`` darf generisch (``cmd``) oder seitenspezifisch (``cmd_r``) sein.
     """
 
     def __init__(
         self,
-        key: str = "alt_r",
-        window: float = 0.35,
-        max_tap_duration: float = 0.30,
+        key: str = "cmd",
+        window: float = 0.50,
+        max_tap_duration: float = 0.45,
     ) -> None:
         self._key = canonical(key)
         if window <= 0 or max_tap_duration <= 0:
@@ -152,11 +157,17 @@ class DoubleTapDetector:
         self._press_time: float | None = None
         self._last_tap_end = 0.0
 
+    def _matches(self, name: str) -> bool:
+        """Ein generisch konfigurierter Modifier passt auf beide Seiten."""
+        if name == self._key:
+            return True
+        return bool(self._key in MODIFIERS and GENERIC.get(name) == self._key)
+
     def describe(self) -> str:
         return f"Doppel-Tap auf {self._key} (Fenster {self._window:.2f}s)"
 
     def on_press(self, name: str, now: float) -> bool:
-        if name != self._key:
+        if not self._matches(name):
             # Andere Taste → die Zieltaste wird als Modifier verwendet.
             self._press_time = None
             self._last_tap_end = 0.0
@@ -166,7 +177,7 @@ class DoubleTapDetector:
         return False  # ausgelöst wird erst beim Loslassen
 
     def on_release(self, name: str, now: float) -> bool:
-        if name != self._key:
+        if not self._matches(name):
             return False
         press_time, self._press_time = self._press_time, None
         if press_time is None:

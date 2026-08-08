@@ -36,6 +36,28 @@ TRIGGER = "trigger"
 #: Ab dieser Callback-Dauer wird gewarnt (Tap-Timeout-Frühwarnung).
 _SLOW_CALLBACK_SECONDS = 0.005
 
+#: Kommt so lange gar kein Tastaturereignis an, stimmt etwas Grundsätzliches
+#: nicht — dann meldet sich der Watchdog mit einer Anleitung.
+_NO_EVENT_WARNING_SECONDS = 20.0
+
+_NO_EVENT_HELP = """\
+Seit dem Start ist KEIN einziges Tastaturereignis angekommen.
+
+Das bedeutet: der Event-Tap liefert nichts — unabhängig davon, welcher
+Auslöser konfiguriert ist. Der Hotkey kann so gar nicht funktionieren.
+
+Fast immer eine fehlende Berechtigung für die App, aus der FlowText
+gestartet wurde (Terminal.app, iTerm2, VS Code, Cursor …):
+
+  Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen
+  Systemeinstellungen → Datenschutz & Sicherheit → Eingabeüberwachung
+
+Beide Schalter setzen, dann die App mit Cmd+Q VOLLSTÄNDIG beenden und neu
+starten. Zum Einrichten Terminal.app verwenden, nicht das IDE-Terminal.
+
+Zum Gegenprüfen:  python -m flowtext --watch-keys\
+"""
+
 
 class HotkeyService:
     """Erkennt den Hotkey und meldet ihn über eine Queue an den Controller."""
@@ -44,8 +66,6 @@ class HotkeyService:
         self,
         cfg: HotkeyConfig,
         events: queue.Queue[str],
-        *,
-        idle_restart_seconds: float = 0.0,
     ) -> None:
         self._cfg = cfg
         self._events = events
@@ -60,10 +80,11 @@ class HotkeyService:
         self._stop = threading.Event()
         self._listener: Any = None
         self._thread: threading.Thread | None = None
-        self._idle_restart = idle_restart_seconds
-        self._last_event = time.monotonic()
         self._slowest_callback = 0.0
         self._dropped = 0
+        self._event_count = 0
+        self._trigger_count = 0
+        self._watchdog: threading.Thread | None = None
 
     # ------------------------------------------------------------------ API
 
@@ -78,6 +99,15 @@ class HotkeyService:
     def dropped_triggers(self) -> int:
         return self._dropped
 
+    @property
+    def event_count(self) -> int:
+        """Wie viele Tastaturereignisse insgesamt angekommen sind."""
+        return self._event_count
+
+    @property
+    def trigger_count(self) -> int:
+        return self._trigger_count
+
     def start(self) -> None:
         if self._thread is not None:
             raise RuntimeError("HotkeyService läuft bereits")
@@ -85,6 +115,22 @@ class HotkeyService:
             target=self._supervise, name="hotkey-supervisor", daemon=True
         )
         self._thread.start()
+        self._watchdog = threading.Thread(
+            target=self._warn_if_no_events, name="hotkey-watchdog", daemon=True
+        )
+        self._watchdog.start()
+
+    def _warn_if_no_events(self) -> None:
+        """Meldet sich, wenn der Event-Tap gar nichts liefert.
+
+        Ohne diese Meldung äußert sich eine fehlende Berechtigung als
+        vollkommene Stille — das Programm läuft, reagiert aber nie.
+        """
+        if self._stop.wait(_NO_EVENT_WARNING_SECONDS):
+            return
+        if self._event_count == 0:
+            for line in _NO_EVENT_HELP.splitlines():
+                log.error("%s", line)
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()
@@ -121,7 +167,7 @@ class HotkeyService:
             log.info("Hotkey aktiv: %s", self._detector.describe())
 
             try:
-                self._join_with_idle_check(listener)
+                listener.join()  # wirft eine gespeicherte Callback-Exception
                 if self._stop.is_set():
                     return
                 log.warning("Hotkey-Listener wurde beendet — unerwartet.")
@@ -142,25 +188,6 @@ class HotkeyService:
             backoff = min(2.0**restarts, 30.0)
             log.info("Neustart des Hotkey-Listeners in %.0fs (Versuch %d).", backoff, restarts)
             self._stop.wait(backoff)
-
-    def _join_with_idle_check(self, listener: Any) -> None:
-        """``listener.join()`` — optional mit proaktivem Neustart bei Funkstille."""
-        if self._idle_restart <= 0:
-            listener.join()
-            return
-        while not self._stop.is_set():
-            listener.join(timeout=5.0)
-            if not listener.running:
-                listener.join()  # wirft eine gespeicherte Callback-Exception
-                return
-            if time.monotonic() - self._last_event > self._idle_restart:
-                log.info(
-                    "Seit %.0fs kein Tastaturereignis — Listener wird vorsorglich neu gestartet.",
-                    self._idle_restart,
-                )
-                listener.stop()
-                listener.join()
-                return
 
     def _reset_detector(self) -> None:
         with self._lock:
@@ -183,6 +210,7 @@ class HotkeyService:
     def _dispatch(self, key: Any, *, press: bool) -> None:
         """Läuft im Event-Tap-Thread. Muss extrem schnell zurückkehren."""
         started = time.perf_counter()
+        self._event_count += 1
         try:
             name = normalize(key)
             if name is None:
@@ -194,7 +222,10 @@ class HotkeyService:
                     if press
                     else self._detector.on_release(name, now)
                 )
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug("%s %s%s", "↓" if press else "↑", name, "  ← AUSGELÖST" if fired else "")
             if fired:
+                self._trigger_count += 1
                 try:
                     self._events.put_nowait(TRIGGER)
                 except queue.Full:
@@ -205,7 +236,6 @@ class HotkeyService:
             log.exception("Fehler im Hotkey-Callback — Ereignis wird ignoriert.")
         finally:
             elapsed = time.perf_counter() - started
-            self._last_event = time.monotonic()
             if elapsed > self._slowest_callback:
                 self._slowest_callback = elapsed
                 if elapsed > _SLOW_CALLBACK_SECONDS:
