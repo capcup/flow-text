@@ -14,7 +14,8 @@ auf das vorhandene ``.venv``:
     ├── Info.plist        Bundle-ID, LSUIElement, Mikrofon-Begründung
     └── MacOS/
         ├── FlowText      nativer arm64-Stub (CFBundleExecutable)
-        ├── python3       Symlink auf den Interpreter des .venv
+        ├── python3       Kopie des Interpreters (~10 kB, ohne Bibliothek)
+        ├── pyvenv.cfg    macht diese Kopie zu einer gültigen venv
         └── launch.sh     zsh-Skript, das ./python3 -m flowtext --menubar startet
 
 Das ``.venv`` bleibt, wo es ist; die 2 GB Modelldaten werden nicht kopiert.
@@ -33,20 +34,29 @@ Aktualisierst du den Code, ist das Bundle sofort aktuell.
   nimmt x86_64 an. Auf Apple Silicon ohne Rosetta scheitert der Start dann
   mit ``-10669``. Deshalb wird ein winziger nativer Stub kompiliert, der nur
   das danebenliegende ``launch.sh`` ausführt.
-* **Der laufende Interpreter muss INNERHALB des Bundles liegen.** AppKit
-  bestimmt ``[NSBundle mainBundle]`` aus dem Pfad der laufenden ausführbaren
-  Datei. Zeigte ``launch.sh`` direkt auf ``…/.venv/bin/python3``, lag der
-  Prozess nach dem ``exec`` außerhalb von ``FlowText.app`` — die App verlor
-  ihre Bundle-Identität und ``NSStatusBar`` zeichnete **kein Menüleisten-
-  Icon**. Die TCC-Rechte überlebten das (sie hängen am verantwortlichen
-  Prozess, der beim Start feststeht), die AppKit-Identität nicht.
-  Deshalb liegt im Bundle ein Symlink ``python3``; die Abhängigkeiten des
-  ``.venv`` kommen über ``PYTHONPATH``, weil die venv-Erkennung von Python
-  am Symlink-Pfad im Bundle nicht mehr greift.
+* **Der laufende Interpreter muss INNERHALB des Bundles liegen — als echte
+  Datei.** AppKit bestimmt ``[NSBundle mainBundle]`` aus dem Pfad der
+  laufenden ausführbaren Datei, und zwar über den *aufgelösten* Pfad.
+  Zeigte ``launch.sh`` direkt auf ``…/.venv/bin/python3``, lag der Prozess
+  nach dem ``exec`` außerhalb von ``FlowText.app``. Ein Symlink im Bundle
+  reicht ebenfalls nicht: ``realpath`` folgt ihm ins ``.venv`` und von dort
+  weiter zum Basis-Interpreter, der Prozess landet also wieder außerhalb.
+  In beiden Fällen verliert die App ihre Bundle-Identität und
+  ``NSStatusBar`` zeichnet **kein Menüleisten-Icon**. Die TCC-Rechte
+  überleben das (sie hängen am verantwortlichen Prozess, der beim Start
+  feststeht), die AppKit-Identität nicht.
+
+  Deshalb wird der Interpreter **kopiert** und ein ``pyvenv.cfg`` daneben
+  gelegt — genau der Aufbau, den ``python -m venv --copies`` erzeugt.
+  Damit ist ``Contents/MacOS`` selbst eine gültige virtuelle Umgebung, die
+  ihre Standardbibliothek über ``home =`` findet. Die Pakete des ``.venv``
+  kommen zusätzlich über ``PYTHONPATH``, weil ``sys.prefix`` jetzt ins
+  Bundle zeigt und die dortigen ``site-packages`` nicht existieren.
 """
 
 from __future__ import annotations
 
+import os
 import platform
 import plistlib
 import shlex
@@ -66,8 +76,18 @@ APP_NAME = "FlowText"
 #: Name des Shellskripts neben dem Stub.
 LAUNCH_SCRIPT = "launch.sh"
 
-#: Symlink auf den Interpreter — muss im Bundle liegen, sonst kein Statusicon.
-PYTHON_LINK = "python3"
+#: Kopie des Interpreters. Muss eine **echte Datei** im Bundle sein, kein
+#: Symlink — sonst zeichnet ``NSStatusBar`` kein Icon (siehe Moduldoku).
+PYTHON_NAME = "python3"
+
+#: Alias für ältere Aufrufer. Der Name stammt aus der Symlink-Zeit.
+PYTHON_LINK = PYTHON_NAME
+
+#: Macht die Interpreter-Kopie im Bundle zu einer gültigen virtuellen
+#: Umgebung. CPython sucht die Datei neben der ausführbaren Datei und eine
+#: Ebene darüber; ``home =`` darin verweist auf den Basis-Interpreter und
+#: damit auf die Standardbibliothek.
+PYVENV_CFG = "pyvenv.cfg"
 
 #: Der Launcher setzt diese Variable, damit die Diagnose das Bundle erkennt.
 #: Nötig, weil ``exec`` die Shell ersetzt: in der Prozesskette steht danach
@@ -97,8 +117,21 @@ int main(int argc, char *argv[]) {
     if (realpath(path, resolved) == NULL) {
         return 1;
     }
+    char *dir = dirname(resolved);
+
+    char project_dir[PATH_MAX];
+    snprintf(project_dir, sizeof(project_dir), "%s/../../..", dir);
+    chdir(project_dir);
+
+    char bundle_path[PATH_MAX];
+    snprintf(bundle_path, sizeof(bundle_path), "%s/../..", dir);
+
+    setenv("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", 1);
+    setenv("FLOWTEXT_APP_BUNDLE", bundle_path, 1);
+    setenv("PYTHONUNBUFFERED", "1", 1);
+
     char script[PATH_MAX];
-    snprintf(script, sizeof(script), "%s/%s", dirname(resolved), "LAUNCH_SCRIPT_NAME");
+    snprintf(script, sizeof(script), "%s/%s", dir, "LAUNCH_SCRIPT_NAME");
     execl("/bin/zsh", "zsh", script, (char *)NULL);
     return 1;
 }
@@ -184,16 +217,30 @@ cd {project} || exit 1
 
 mkdir -p {log_dir}
 
-# Damit die Diagnose weiß, dass wir aus dem Bundle kommen (exec verdeckt das).
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export {BUNDLE_ENV_VAR}={bundle}
 export PYTHONUNBUFFERED=1
 {pythonpath}
-# WICHTIG: der Interpreter wird über den Symlink IM Bundle gestartet.
-# Zeigte dieser Pfad nach draußen, läge der Prozess außerhalb von
-# FlowText.app — AppKit verlöre die Bundle-Identität und es gäbe kein
-# Menüleisten-Icon.
-exec "$(dirname "$0")/{PYTHON_LINK}" -m flowtext --menubar >> {log_dir}/launcher.log 2>&1
+LOGFILE={log_dir}/launcher.log
+touch "$LOGFILE" 2>/dev/null || LOGFILE="/dev/null"
+exec "$(dirname "$0")/{PYTHON_NAME}" -m flowtext --menubar >> "$LOGFILE" 2>&1
 """
+
+
+def pyvenv_config(spec: BundleSpec) -> str:
+    """Inhalt der ``pyvenv.cfg``, die neben die Interpreter-Kopie kommt.
+
+    Die Datei des ``.venv`` wird unverändert übernommen: ihr ``home =``
+    zeigt auf den Basis-Interpreter, über den die Kopie im Bundle ihre
+    Standardbibliothek findet. Ohne sie startet die Kopie nicht, weil sie
+    an ihrem neuen Ort kein ``lib/pythonX.Y`` neben sich hat.
+    """
+    existing = spec.python.parent.parent / PYVENV_CFG
+    if existing.is_file():
+        return existing.read_text(encoding="utf-8")
+    # Kein .venv — dann ist der Basis-Interpreter selbst das Zuhause.
+    home = spec.python.resolve().parent
+    return f"home = {home}\ninclude-system-site-packages = false\n"
 
 
 def stub_source() -> str:
@@ -241,8 +288,14 @@ def build(spec: BundleSpec, dest_dir: Path) -> BuildResult:
     with (contents / "Info.plist").open("wb") as fh:
         plistlib.dump(info_plist(spec), fh)
 
-    # Interpreter ins Bundle holen — nur ein Symlink, nichts wird kopiert.
-    (macos / PYTHON_LINK).symlink_to(spec.python)
+    # Interpreter ins Bundle holen. Bewusst eine Kopie: einem Symlink folgt
+    # realpath() zurück ins .venv, und AppKit sähe den Prozess dann wieder
+    # außerhalb des Bundles — ohne Bundle-Identität kein Statusicon.
+    # Kopiert wird nur das Startbinary (~10 kB), nicht die Bibliothek.
+    interpreter = macos / PYTHON_NAME
+    shutil.copy2(spec.python.resolve(), interpreter)
+    interpreter.chmod(0o755)
+    (macos / PYVENV_CFG).write_text(pyvenv_config(spec), encoding="utf-8")
 
     script = macos / LAUNCH_SCRIPT
     script.write_text(launcher_script(spec, app_path), encoding="utf-8")
@@ -326,13 +379,54 @@ def verify_interpreter(python: Path, project: Path) -> tuple[bool, str]:
     return False, detail[-1] if detail else "Import fehlgeschlagen"
 
 
+def verify_bundle(app_path: Path, project: Path, site_packages: Path | None) -> tuple[bool, str]:
+    """Startet die Interpreter-Kopie *im Bundle* und prüft ihre Importe.
+
+    Fängt den Preis der Kopie ab: findet das kopierte Startbinary seine
+    Standardbibliothek nicht (fehlerhafte ``pyvenv.cfg``) oder verweist es
+    relativ auf sein Framework, scheitert es erst beim Doppelklick — und
+    dort sieht man nichts.
+    """
+    if sys.platform != "darwin":
+        return False, "nur unter macOS prüfbar"
+
+    interpreter = app_path / "Contents" / "MacOS" / PYTHON_NAME
+    if not interpreter.is_file():
+        return False, f"Interpreter fehlt im Bundle: {interpreter}"
+
+    env = dict(os.environ)
+    if site_packages:
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = f"{site_packages}:{existing}" if existing else str(site_packages)
+
+    modules = ["flowtext", "pynput", "sounddevice", "soundfile", "numpy", "rumps"]
+    code = "import " + ", ".join(modules)
+    try:
+        result = subprocess.run(
+            [str(interpreter), "-c", code],
+            cwd=project,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"Interpreter im Bundle nicht ausführbar: {exc}"
+
+    if result.returncode == 0:
+        return True, "Interpreter im Bundle startet und findet alles"
+
+    detail = (result.stderr or result.stdout).strip().splitlines()
+    return False, detail[-1] if detail else "Start im Bundle fehlgeschlagen"
+
+
 def site_packages_of(python: Path) -> Path | None:
     """site-packages des Interpreters — für ``PYTHONPATH`` im Bundle.
 
-    Python erkennt die virtuelle Umgebung nicht mehr, wenn es über den
-    Symlink im Bundle gestartet wird: es sucht ``pyvenv.cfg`` neben der
-    ausführbaren Datei, und die liegt dann in ``Contents/MacOS``. Deshalb
-    wird der Pfad hier einmal beim Bauen ermittelt und fest eingetragen.
+    Im Bundle zeigt ``sys.prefix`` auf ``Contents/MacOS`` (dort liegt die
+    ``pyvenv.cfg``), und dortige ``site-packages`` gibt es nicht. Deshalb
+    wird der echte Pfad hier einmal beim Bauen ermittelt und fest ins
+    Startskript eingetragen.
     """
     code = "import sysconfig; print(sysconfig.get_paths()['purelib'])"
     try:
@@ -385,7 +479,8 @@ So geht es weiter:
 
 Gut zu wissen:
   * Das Bundle zeigt nur auf dein .venv — Codeänderungen wirken sofort,
-    ohne Neubau.
+    ohne Neubau. Nur nach einem Python-Update oder einem neuen .venv muss
+    das Bundle neu erzeugt werden (die Interpreter-Kopie wird dann alt).
   * Nach einem Neubau kann macOS die Freigabe zurücksetzen, weil sich die
     Signatur ändert. Dann Schritt 2 wiederholen.
   * Startprobleme stehen in launcher.log neben dem normalen Logfile.

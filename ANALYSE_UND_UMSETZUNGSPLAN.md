@@ -46,6 +46,36 @@
 > statt zwei Tage. Der entscheidende Gewinn ist derselbe: FlowText hat eine eigene
 > TCC-Identität, das Terminal braucht keine Rechte mehr.
 >
+> ### Nachtrag 09.08.2026: das fehlende Menüleisten-Icon
+>
+> Das Bundle startete, das Diktat funktionierte, die Rechte stimmten — nur das
+> Statusicon fehlte. Ursache war die Bundle-Identität: **AppKit ermittelt
+> `[NSBundle mainBundle]` über den _aufgelösten_ Pfad der laufenden ausführbaren
+> Datei.** Ein Symlink `Contents/MacOS/python3` genügt daher nicht; `realpath`
+> folgt ihm ins `.venv` und weiter zum Basis-Interpreter, der Prozess liegt also
+> wieder außerhalb der `.app` und `NSStatusBar` zeichnet nichts. Die TCC-Rechte
+> überleben das, weil sie am verantwortlichen Prozess hängen — daher das
+> irreführende Bild „alles funktioniert außer dem Icon".
+>
+> Behoben durch eine **Kopie** des Startbinaries plus `pyvenv.cfg` daneben, also
+> genau den Aufbau von `python -m venv --copies`. `bundle.verify_bundle()` startet
+> die Kopie nach dem Bauen und prüft ihre Importe, damit ein kaputter Framework-
+> Verweis nicht erst beim Doppelklick auffällt.
+>
+> Der Weg dorthin war eine Bisektion: minimale rumps-App im Terminal (Icon da) →
+> FlowText im Terminal (Icon da) → minimale rumps-App **aus dem Bundle** (kein
+> Icon). Damit war der eigene Code entlastet und nur noch der Startpfad übrig.
+>
+> Dahinter lag eine **zweite, unabhängige Ursache**: `MenubarApp.run()` rief
+> `app.start()` *vor* `rumps.run()`. pynput, PortAudio und MLX legen dabei eigene
+> CoreFoundation-Runloops an — geschieht das, bevor `NSApplication` den Hauptthread
+> besitzt, kehrt `rumps.run()` sofort zurück, das `finally` fährt alles wieder
+> herunter, und die App beendet sich nach wenigen Sekunden scheinbar grundlos.
+> Genau das zeigte `launcher.log`: sauberer Start, Modell geladen, Shutdown.
+> `app.start()` läuft jetzt im ersten Timer-Tick, also innerhalb der laufenden
+> Runloop. Kehrt `rumps.run()` künftig zu schnell zurück, sagt das Log es
+> ausdrücklich, statt nur ein fehlendes Icon zu hinterlassen.
+>
 > Offen bleiben Push-to-Talk, Streaming-Transkription und die Vokabularlisten.
 
 ---
@@ -844,6 +874,7 @@ config.local.toml
 | 5-Minuten-Aufnahme | Automatischer Stopp, valide WAV, kein Speicherleck |
 | Text in TextEdit diktieren | Text erscheint, Clipboard-Inhalt danach wiederhergestellt |
 | Hotkey in einem Textfeld drücken | **Kein** unsichtbares Zeichen wird eingefügt |
+| `FlowText.app` Gatekeeper & LaunchServices Start (`open dist/FlowText.app`) | App startet ohne Gatekeeper-Blockade (`spctl: rejected`), Menüleisten-Icon 🎙 erscheint und TCC-Rechte (Bedienungshilfen, Eingabeüberwachung, Mikrofon) werden eigenständig für `FlowText.app` registriert |
 
 ### Definition of Done für v1.1
 

@@ -52,9 +52,9 @@ class ClipboardInjector:
             log.warning("Zwischenablage nicht verfügbar (%s) — Ausgabe wird scheitern.", exc)
             return
         if self._paste:
-            log.info("Ausgabe: Zwischenablage + Cmd+V.")
+            log.info("Output: Clipboard + Cmd+V.")
         else:
-            log.info("Ausgabe: nur Zwischenablage (Einfügen von Hand).")
+            log.info("Output: Clipboard only (manual paste).")
 
     def inject(self, text: str) -> None:
         if not text:
@@ -65,10 +65,10 @@ class ClipboardInjector:
         try:
             pyperclip.copy(text)
         except Exception as exc:
-            raise InjectionError(f"Zwischenablage konnte nicht gesetzt werden: {exc}") from exc
+            raise InjectionError(f"Could not set clipboard: {exc}") from exc
 
         if not self._paste:
-            log.info("Text liegt in der Zwischenablage (%d Zeichen).", len(text))
+            log.info("Text copied to clipboard (%d characters).", len(text))
             return
 
         time.sleep(_PASTE_DELAY)
@@ -93,12 +93,27 @@ class ClipboardInjector:
     # -------------------------------------------------------------- intern
 
     def _press_paste_shortcut(self) -> None:
-        from pynput.keyboard import Controller, Key
+        import subprocess
 
-        controller: Any = Controller()
-        with controller.pressed(Key.cmd):
-            controller.press("v")
-            controller.release("v")
+        try:
+            subprocess.run(
+                [
+                    "/usr/bin/osascript",
+                    "-e",
+                    'tell application "System Events" to keystroke "v" using command down',
+                ],
+                check=True,
+                capture_output=True,
+                timeout=3.0,
+            )
+        except Exception as exc:  # noqa: BLE001 — jeder Fehler soll den Rückfall auslösen
+            log.debug("AppleScript Cmd+V fehlgeschlagen (%s), versuche pynput...", exc)
+            from pynput.keyboard import Controller, Key
+
+            controller: Any = Controller()
+            with controller.pressed(Key.cmd):
+                controller.press("v")
+                controller.release("v")
 
     def _read_clipboard(self) -> str | None:
         try:

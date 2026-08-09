@@ -86,12 +86,12 @@ class FlowTextApp:
         for thread in self._threads:
             thread.start()
         self.hotkey.start()
-        log.info("FlowText läuft. Auslöser: %s.", self.hotkey.describe())
+        log.info("FlowText running. Trigger: %s.", self.hotkey.describe())
 
     def run(self) -> None:
         """Startet alles und blockiert bis zum Stopp (CLI-Variante)."""
         self.start()
-        log.info("Beenden mit Ctrl+C.")
+        log.info("Press Ctrl+C to quit.")
         try:
             while not self._stop.wait(0.5):
                 pass
@@ -102,7 +102,7 @@ class FlowTextApp:
         try:
             self.pipeline.warmup()
         except Exception:
-            log.exception("Warmup fehlgeschlagen — das erste Diktat wird langsam.")
+            log.exception("Warmup failed — initial dictation will be delayed.")
 
     def request_stop(self) -> None:
         """Signalsicher: setzt nur ein Event, kein Logging, keine I/O."""
@@ -137,8 +137,8 @@ class FlowTextApp:
         if value and self.state.current is State.RECORDING:
             self.recorder.abort()
             self.state.transition(State.IDLE)
-            log.info("Laufende Aufnahme wegen Pause verworfen.")
-        log.info("FlowText %s.", "pausiert" if value else "wieder aktiv")
+            log.info("Recording discarded due to pause.")
+        log.info("FlowText %s.", "paused" if value else "active again")
 
     def shutdown(self) -> None:
         if not self._stop.is_set():
@@ -149,9 +149,9 @@ class FlowTextApp:
         for thread in self._threads:
             thread.join(timeout=2.0)
         if self.hotkey.dropped_triggers:
-            log.warning("%d Auslöser wurden verworfen (Überlast).", self.hotkey.dropped_triggers)
+            log.warning("%d triggers discarded (overload).", self.hotkey.dropped_triggers)
         log.info(
-            "FlowText beendet. Langsamster Hotkey-Callback: %.2f ms.",
+            "FlowText stopped. Slowest hotkey callback: %.2f ms.",
             self.hotkey.slowest_callback_ms,
         )
 
@@ -168,12 +168,12 @@ class FlowTextApp:
                 try:
                     self._on_trigger()
                 except Exception:
-                    log.exception("Unerwarteter Fehler im Controller.")
+                    log.exception("Unexpected error in controller.")
                     self._to_error()
 
     def _on_trigger(self) -> None:
         if self._paused:
-            log.debug("Auslöser ignoriert — FlowText ist pausiert.")
+            log.debug("Trigger ignored — FlowText is paused.")
             return
         current = self.state.current
         if current is State.IDLE:
@@ -181,38 +181,38 @@ class FlowTextApp:
         elif current is State.RECORDING:
             self._finish_recording()
         else:
-            log.info("Auslöser ignoriert — Zustand ist %s.", current)
+            log.info("Trigger ignored — state is %s.", current)
 
     def _begin_recording(self) -> None:
         try:
             self.recorder.start()
         except AudioError as exc:
-            log.error("Aufnahme konnte nicht gestartet werden: %s", exc)
+            log.error("Could not start recording: %s", exc)
             log.error(
-                "Prüfen: Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon "
-                "für die startende App (Terminal, iTerm2, VS Code …)."
+                "Check: System Settings → Privacy & Security → Microphone "
+                "for the starting app (Terminal, iTerm2, VS Code …)."
             )
             self._to_error()
             return
         self.state.transition(State.RECORDING)
-        log.info("🎤 Aufnahme läuft — erneut auslösen zum Stoppen.")
+        log.info("🎤 Recording active — trigger again to stop.")
 
     def _finish_recording(self, *, reason: str = "Hotkey") -> None:
         recording = self.recorder.stop()
         if recording is None:
-            log.info("Aufnahme verworfen (%s).", reason)
+            log.info("Recording discarded (%s).", reason)
             self.state.transition(State.IDLE)
             return
 
         self.state.transition(State.PROCESSING)
         log.info(
-            "🛑 Aufnahme beendet (%s): %.2fs, Pegel %.3f.",
+            "🛑 Recording stopped (%s): %.2fs, peak %.3f.",
             reason,
             recording.duration,
             recording.peak,
         )
         if recording.peak < 0.001:
-            log.warning("Signal ist praktisch stumm — falsches Eingabegerät?")
+            log.warning("Audio signal is practically silent — wrong input device?")
 
         try:
             path = self.recorder.save(recording, self._new_temp_path())

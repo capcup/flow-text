@@ -101,12 +101,12 @@ class Pipeline:
         result = self.transcriber.transcribe(audio_path)
         text = result.text.strip()
         log.info(
-            "Transkribiert in %.2fs: %r",
+            "Transcribed in %.2fs: %r",
             time.perf_counter() - started,
             text[:120] + ("…" if len(text) > 120 else ""),
         )
         if not text:
-            log.warning("Leeres Transkript — nichts auszugeben.")
+            log.warning("Empty transcript — nothing to output.")
             return ""
 
         if self.refiner is not None:
@@ -115,10 +115,10 @@ class Pipeline:
                 if refined.strip():
                     text = refined.strip()
             except Exception:
-                log.exception("Verfeinerung fehlgeschlagen — nutze das Rohtranskript.")
+                log.exception("Refinement failed — using raw transcript.")
 
         if self.injector is not None:
             self.injector.inject(text)
 
-        log.info("Fertig in %.2fs.", time.perf_counter() - started)
+        log.info("Finished in %.2fs.", time.perf_counter() - started)
         return text

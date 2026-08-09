@@ -28,6 +28,7 @@ from flowtext.bundle import (
     codesign,
     next_steps,
     site_packages_of,
+    verify_bundle,
     verify_interpreter,
 )
 from flowtext.config import log_dir
@@ -119,6 +120,20 @@ def main(argv: list[str] | None = None) -> int:
         if not ok:
             print("\n⚠️  Signieren fehlgeschlagen — das Bundle läuft, aber die")
             print("   Berechtigung überlebt einen Neubau womöglich nicht.")
+
+    if not args.no_verify:
+        ok, message = verify_bundle(result.app_path, PROJECT, site_packages)
+        print(f"Bundle-Start: {message}")
+        if not ok:
+            sys.stderr.write(
+                "\n❌ Die Interpreter-Kopie im Bundle startet nicht — Abbruch.\n\n"
+                "   Ohne Neubau des .venv hilft meist:\n"
+                f"       cd {PROJECT}\n"
+                "       rm -rf .venv && python3 -m venv .venv\n"
+                "       .venv/bin/pip install -r requirements.txt\n\n"
+                "   Prüfung überspringen: --no-verify\n"
+            )
+            return 1
 
     print("\n" + next_steps(result))
 

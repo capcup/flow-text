@@ -82,10 +82,14 @@ class FakeHotkey:
     dropped_triggers = 0
     slowest_callback_ms = 0.1
 
-    def describe(self) -> str:
-        return "Doppel-Tap auf cmd"
+    def __init__(self) -> None:
+        self.started = False
 
-    def start(self) -> None: ...
+    def describe(self) -> str:
+        return "Double-tap cmd"
+
+    def start(self) -> None:
+        self.started = True
 
     def stop(self, timeout: float = 2.0) -> None: ...
 
@@ -119,7 +123,13 @@ def rumps_module(monkeypatch, quitted):
 @pytest.fixture
 def menu(rumps_module, monkeypatch, tmp_path):
     from flowtext import app as app_module
+    from flowtext.permissions import HIDAccess, Permissions
 
+    monkeypatch.setattr(
+        menubar.permissions,
+        "check",
+        lambda: Permissions(accessibility=True, input_monitoring=HIDAccess.GRANTED),
+    )
     monkeypatch.setattr(app_module, "temp_dir", lambda: tmp_path / "tmp")
     cfg = Config()
     cfg.feedback.sound = False
@@ -151,10 +161,10 @@ class TestDisplay:
     @pytest.mark.parametrize(
         ("state", "icon", "label"),
         [
-            (State.IDLE, "🎙", "Bereit"),
-            (State.RECORDING, "🔴", "Nimmt auf …"),
-            (State.PROCESSING, "⏳", "Verarbeitet …"),
-            (State.ERROR, "⚠️", "Fehler — siehe Log"),
+            (State.IDLE, "🎙", "Ready"),
+            (State.RECORDING, "🔴", "Recording…"),
+            (State.PROCESSING, "⏳", "Processing…"),
+            (State.ERROR, "⚠️", "Error — see log"),
         ],
     )
     def test_every_state_has_its_own_icon(self, state: State, icon: str, label: str) -> None:
@@ -164,7 +174,7 @@ class TestDisplay:
     def test_pause_overrides_every_state(self) -> None:
         for state in State:
             assert menubar.icon_for(state, paused=True) == menubar.PAUSED_ICON
-            assert menubar.label_for(state, paused=True) == "Pausiert"
+            assert menubar.label_for(state, paused=True) == "Paused"
 
     def test_icons_are_distinct(self) -> None:
         """Sonst sieht man den Zustandswechsel nicht."""
@@ -175,16 +185,40 @@ class TestDisplay:
 
 
 class TestMenubarApp:
-    def test_run_starts_the_app_and_the_timer(self, menu) -> None:
+    def test_run_shows_the_ui_and_arms_the_timer(self, menu) -> None:
         menu.run()
         assert menu._ui.ran
         assert FakeTimer.instances[-1].started
         assert FakeTimer.instances[-1].interval == menubar.TICK_SECONDS
 
+    def test_app_does_not_start_before_the_runloop(self, menu) -> None:
+        """Regression: keine Menüleisten-App, App beendet sich nach Sekunden.
+
+        Lief ``app.start()`` vor ``rumps.run()``, legten pynput, PortAudio
+        und MLX ihre CoreFoundation-Runloops an, bevor NSApplication den
+        Hauptthread besaß. ``rumps.run()`` kehrte dann sofort zurück, das
+        ``finally`` fuhr alles wieder herunter — und es gab nie ein Icon.
+        """
+        menu.run()
+        assert menu.app.hotkey.started is False
+
+    def test_first_tick_starts_the_app(self, menu) -> None:
+        _run_ui(menu)
+        FakeTimer.instances[-1].tick()
+        assert menu.app.hotkey.started is True
+
+    def test_start_happens_only_once(self, menu) -> None:
+        _run_ui(menu)
+        timer = FakeTimer.instances[-1]
+        timer.tick()
+        menu.app.hotkey.started = False  # ein zweiter start() fiele hier auf
+        timer.tick()
+        assert menu.app.hotkey.started is False
+
     def test_menu_shows_the_trigger(self, menu) -> None:
         menu.run()
         titles = [item.title for item in menu._ui.menu if item is not None]
-        assert any("Doppel-Tap auf cmd" in t for t in titles)
+        assert any("Double-tap cmd" in t for t in titles)
 
     def test_status_items_are_not_clickable(self, menu) -> None:
         menu.run()
@@ -198,7 +232,7 @@ class TestMenubarApp:
         assert menu._ui.title == "🎙"  # noch nicht übertragen
         FakeTimer.instances[-1].tick()
         assert menu._ui.title == "🔴"
-        assert menu._items["status"].title == "Nimmt auf …"
+        assert menu._items["status"].title == "Recording…"
 
     def test_pause_toggles_and_relabels(self, menu) -> None:
         _run_ui(menu)
@@ -206,12 +240,12 @@ class TestMenubarApp:
         assert menu.app.paused
         FakeTimer.instances[-1].tick()
         assert menu._ui.title == menubar.PAUSED_ICON
-        assert menu._items["pause"].title == "Fortsetzen"
+        assert menu._items["pause"].title == "Resume"
 
         menu._toggle_pause(None)
         assert not menu.app.paused
         FakeTimer.instances[-1].tick()
-        assert menu._items["pause"].title == "Pausieren"
+        assert menu._items["pause"].title == "Pause"
 
     def test_quit_stops_the_app(self, menu, quitted) -> None:
         menu.run()
@@ -315,7 +349,7 @@ class TestPermissionState:
             )
             assert (
                 menubar.label_for(state, paused=True, permissions_ok=False)
-                == "Berechtigungen fehlen"
+                == "Permissions missing"
             )
 
     def test_starts_and_shows_the_lock(self, rumps_module, monkeypatch, tmp_path) -> None:
@@ -335,7 +369,7 @@ class TestPermissionState:
         menu = menubar.MenubarApp(cfg, flow)
         menu.run()  # darf NICHT vorher abbrechen
         assert menu._ui.title == menubar.LOCKED_ICON
-        assert menu._items["status"].title == "Berechtigungen fehlen"
+        assert menu._items["status"].title == "Permissions missing"
 
     def test_lock_disappears_once_granted(self, rumps_module, monkeypatch, tmp_path) -> None:
         from flowtext import app as app_module
@@ -363,8 +397,8 @@ class TestPermissionState:
     def test_menu_offers_both_settings_panes(self, menu) -> None:
         menu.run()
         titles = [item.title for item in menu._ui.menu if item is not None]
-        assert any("Bedienungshilfen" in t for t in titles)
-        assert any("Eingabeüberwachung" in t for t in titles)
+        assert any("Accessibility" in t for t in titles)
+        assert any("Input Monitoring" in t for t in titles)
 
     def test_settings_links_target_the_privacy_panes(self, menu, monkeypatch) -> None:
         opened: list[str] = []
@@ -399,7 +433,8 @@ def test_menubar_does_not_block_on_the_model(rumps_module, monkeypatch, tmp_path
         pipeline=SlowPipeline(),  # type: ignore[arg-type]
     )
     menu = menubar.MenubarApp(cfg, flow)
-    menu.run()  # würde ohne den Fix 5 s hängen
+    _run_ui(menu)
+    FakeTimer.instances[-1].tick()  # würde ohne den Fix 5 s hängen
     assert menu._ui.ran
     blocked.set()
 

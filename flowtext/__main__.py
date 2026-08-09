@@ -24,27 +24,27 @@ from .logging_setup import setup as setup_logging
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="flowtext",
-        description="Lokale Voice-to-Text-Engine für macOS.",
+        description="Local Voice-to-Text Engine for macOS.",
     )
-    parser.add_argument("--config", type=Path, help="Pfad zu einer config.toml")
+    parser.add_argument("--config", type=Path, help="Path to a config.toml")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     parser.add_argument("--hotkey-mode", choices=["double_tap", "combo"])
-    parser.add_argument("--combo", help="Kombination, z. B. '<ctrl>+<shift>+d'")
-    parser.add_argument("--tap-key", help="Taste für Doppel-Tap, z. B. cmd_r")
+    parser.add_argument("--combo", help="Combination, e.g. '<ctrl>+<shift>+d'")
+    parser.add_argument("--tap-key", help="Key for double-tap, e.g. cmd_r")
     parser.add_argument(
         "--menubar",
         action="store_true",
-        help="Als Menüleisten-App starten (Statusicon statt Terminal-Log)",
+        help="Start as menu bar app (status icon instead of terminal log)",
     )
     parser.add_argument(
         "--watch-keys",
         action="store_true",
-        help="Tastaturereignisse live anzeigen statt aufzunehmen (Diagnose)",
+        help="Watch keyboard events live instead of recording (diagnostics)",
     )
     parser.add_argument(
         "--skip-permission-check",
         action="store_true",
-        help="Berechtigungsprüfung überspringen (nur zum Debuggen)",
+        help="Skip permissions check (for debugging only)",
     )
     parser.add_argument("--version", action="version", version=f"FlowText {__version__}")
     return parser.parse_args(argv)
@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         diagnostics.report_permissions()
         return 0 if diagnostics.watch_keys(cfg) else 1
 
-    perms = permissions.check()
+    perms = permissions.check(prompt=False)
     log.info(perms.summary())
     if not perms.ok and not args.skip_permission_check:
         # In der Menüleisten-Variante darf das kein Abbruch sein: eine frisch

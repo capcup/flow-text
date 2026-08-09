@@ -22,8 +22,8 @@ def test_granted_is_ok() -> None:
 
 def test_summary_is_readable() -> None:
     summary = Permissions(False, HIDAccess.DENIED).summary()
-    assert "FEHLT" in summary
-    assert "verweigert" in summary
+    assert "MISSING" in summary
+    assert "denied" in summary
 
 
 def test_environment_report_mentions_interpreter() -> None:

@@ -5,8 +5,13 @@ aber nie, ob gerade aufgenommen wird oder die Transkription noch läuft.
 
 **Zwei Regeln bestimmen den Aufbau:**
 
-1. *Cocoa gehört der Hauptthread.* ``rumps`` blockiert ihn, deshalb startet
-   :class:`~flowtext.app.FlowTextApp` hier über ``start()`` statt ``run()``.
+1. *Cocoa gehört der Hauptthread — und zwar zuerst.* ``rumps`` blockiert ihn,
+   deshalb startet :class:`~flowtext.app.FlowTextApp` hier über ``start()``
+   statt ``run()``. Entscheidend ist die Reihenfolge: ``start()`` läuft erst
+   im ersten Timer-Tick, also **innerhalb** der bereits laufenden Runloop.
+   Vorher gestartet, legen pynput, PortAudio und MLX ihre eigenen
+   CoreFoundation-Runloops an, ``rumps.run()`` kehrt sofort zurück und es
+   erscheint nie ein Icon.
 2. *Kein Cocoa-Zugriff aus fremden Threads.* Der Zustandswechsel kommt aus
    dem Controller-Thread; er wird nur in ein Attribut geschrieben. Ein
    rumps-Timer läuft im Hauptthread und überträgt ihn in die Oberfläche.
@@ -21,6 +26,7 @@ import importlib.util
 import logging
 import subprocess
 import sys
+import time
 from typing import Any
 
 from . import permissions
@@ -45,10 +51,10 @@ PAUSED_ICON = "⏸"
 LOCKED_ICON = "🔒"
 
 LABELS: dict[State, str] = {
-    State.IDLE: "Bereit",
-    State.RECORDING: "Nimmt auf …",
-    State.PROCESSING: "Verarbeitet …",
-    State.ERROR: "Fehler — siehe Log",
+    State.IDLE: "Ready",
+    State.RECORDING: "Recording…",
+    State.PROCESSING: "Processing…",
+    State.ERROR: "Error — see log",
 }
 
 #: Direktlinks in die Systemeinstellungen.
@@ -67,6 +73,11 @@ PERMISSION_RECHECK_TICKS = 10
 #: Wie oft die Oberfläche den Zustand abholt. 0,2 s ist unauffällig und
 #: kostet praktisch nichts.
 TICK_SECONDS = 0.2
+
+#: Kehrt ``rumps.run()`` schneller zurück, hat die Cocoa-Runloop nie
+#: gelaufen. Das ist kein normales Beenden, sondern ein Fehler — und einer,
+#: der sich sonst nur als „kein Icon" äußert.
+MIN_RUNLOOP_SECONDS = 1.0
 
 
 def available() -> bool:
@@ -87,9 +98,9 @@ def icon_for(state: State, paused: bool, permissions_ok: bool = True) -> str:
 
 def label_for(state: State, paused: bool, permissions_ok: bool = True) -> str:
     if not permissions_ok:
-        return "Berechtigungen fehlen"
+        return "Permissions missing"
     if paused:
-        return "Pausiert"
+        return "Paused"
     return LABELS.get(state, str(state))
 
 
@@ -98,7 +109,7 @@ def _open(path: str) -> None:
     try:
         subprocess.Popen(["/usr/bin/open", path])
     except OSError as exc:
-        log.warning("Konnte %s nicht öffnen: %s", path, exc)
+        log.warning("Could not open %s: %s", path, exc)
 
 
 class MenubarApp:
@@ -112,6 +123,7 @@ class MenubarApp:
         self._items: dict[str, Any] = {}
         self._permissions_ok = permissions.check().ok
         self._ticks = 0
+        self._started = False
         # Läuft im Controller-Thread: NUR schreiben, kein Cocoa-Zugriff.
         app.state.subscribe(self._remember_state)
 
@@ -128,12 +140,24 @@ class MenubarApp:
         )
         self._build_menu(rumps)
 
-        # Modell nebenher laden, damit das Icon sofort erscheint.
-        self.app.start(background_warmup=True)
+        # FlowText wird hier bewusst NICHT gestartet, sondern erst im ersten
+        # Timer-Tick. ``app.start()`` zieht pynput, PortAudio und MLX hoch;
+        # jedes davon legt eigene CoreFoundation-Runloops an. Geschieht das,
+        # bevor NSApplication den Hauptthread übernommen hat, kehrt
+        # ``rumps.run()`` sofort zurück — kein Statusicon, und die App
+        # beendet sich nach wenigen Sekunden scheinbar grundlos wieder.
+        # Der erste Tick läuft bereits innerhalb der Cocoa-Runloop.
         rumps.Timer(self._tick, TICK_SECONDS).start()
+        began = time.monotonic()
         try:
             self._ui.run()
         finally:
+            elapsed = time.monotonic() - began
+            if elapsed < MIN_RUNLOOP_SECONDS:
+                log.error(
+                    "rumps.run() returned after %.2fs — Cocoa runloop never ran.",
+                    elapsed,
+                )
             self.app.shutdown()
 
     # ------------------------------------------------------------- Aufbau
@@ -141,12 +165,12 @@ class MenubarApp:
     def _build_menu(self, rumps: Any) -> None:
         status = rumps.MenuItem(label_for(self._state, self.app.paused, self._permissions_ok))
         status.set_callback(None)  # reine Anzeige
-        trigger = rumps.MenuItem(f"Auslöser: {self.app.hotkey.describe()}")
+        trigger = rumps.MenuItem(f"Trigger: {self.app.hotkey.describe()}")
         trigger.set_callback(None)
 
         self._items = {
             "status": status,
-            "pause": rumps.MenuItem("Pausieren", callback=self._toggle_pause),
+            "pause": rumps.MenuItem("Pause", callback=self._toggle_pause),
         }
         self._ui.menu = [
             status,
@@ -154,13 +178,13 @@ class MenubarApp:
             None,
             self._items["pause"],
             None,
-            rumps.MenuItem("Bedienungshilfen freigeben …", callback=self._open_accessibility),
-            rumps.MenuItem("Eingabeüberwachung freigeben …", callback=self._open_input_monitoring),
+            rumps.MenuItem("Grant Accessibility…", callback=self._open_accessibility),
+            rumps.MenuItem("Grant Input Monitoring…", callback=self._open_input_monitoring),
             None,
-            rumps.MenuItem("Konfiguration öffnen …", callback=self._open_config),
-            rumps.MenuItem("Logdatei öffnen …", callback=self._open_log),
+            rumps.MenuItem("Open Configuration…", callback=self._open_config),
+            rumps.MenuItem("Open Log File…", callback=self._open_log),
             None,
-            rumps.MenuItem("FlowText beenden", callback=self._quit),
+            rumps.MenuItem("Quit FlowText", callback=self._quit),
         ]
 
     # ----------------------------------------------------------- Callbacks
@@ -171,6 +195,12 @@ class MenubarApp:
 
     def _tick(self, _timer: Any) -> None:
         """Läuft im Hauptthread; nur hier wird die Oberfläche angefasst."""
+        if not self._started:
+            # Jetzt läuft die Cocoa-Runloop — ab hier ist der Start sicher.
+            # Das Modell lädt nebenher, damit das Icon sofort erscheint.
+            self._started = True
+            self.app.start(background_warmup=True)
+
         if self.app.stop_requested:
             # SIGTERM/SIGINT setzen nur ein Event. rumps blockiert den
             # Hauptthread, also muss der Timer das Beenden auslösen —
@@ -186,12 +216,12 @@ class MenubarApp:
             # erteilt, soll das Schloss ohne Neustart verschwinden.
             self._permissions_ok = permissions.check().ok
             if self._permissions_ok:
-                log.info("Berechtigungen sind jetzt erteilt.")
+                log.info("Permissions granted.")
 
         paused = self.app.paused
         self._ui.title = icon_for(self._state, paused, self._permissions_ok)
         self._items["status"].title = label_for(self._state, paused, self._permissions_ok)
-        self._items["pause"].title = "Fortsetzen" if paused else "Pausieren"
+        self._items["pause"].title = "Resume" if paused else "Pause"
 
     def _toggle_pause(self, _sender: Any) -> None:
         self.app.set_paused(not self.app.paused)

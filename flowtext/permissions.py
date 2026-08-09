@@ -41,9 +41,9 @@ class HIDAccess(IntEnum):
     @property
     def label(self) -> str:
         return {
-            HIDAccess.GRANTED: "erteilt",
-            HIDAccess.DENIED: "verweigert",
-            HIDAccess.UNKNOWN: "unbekannt (noch nie angefragt)",
+            HIDAccess.GRANTED: "granted",
+            HIDAccess.DENIED: "denied",
+            HIDAccess.UNKNOWN: "unknown (never requested)",
         }[self]
 
 
@@ -59,21 +59,22 @@ class Permissions:
     def ok(self) -> bool:
         """Reicht das für einen funktionierenden Event-Tap?
 
-        ``UNKNOWN`` gilt als ausreichend: macOS zeigt beim ersten Tap-Versuch
-        den Systemdialog an. ``DENIED`` ist ein hartes Nein.
+        AXIsProcessTrusted **muss** True sein. Input Monitoring darf GRANTED
+        oder UNKNOWN sein: bei UNKNOWN hat macOS die Berechtigung noch nie
+        abgefragt und tut das beim Erzeugen des Taps selbst.
         """
         return self.accessibility and self.input_monitoring is not HIDAccess.DENIED
 
     def summary(self) -> str:
         if not self.checked:
-            return "Berechtigungen: nicht geprüft (kein macOS)"
+            return "Permissions: not checked (non-macOS)"
         return (
-            f"Bedienungshilfen: {'erteilt' if self.accessibility else 'FEHLT'} | "
-            f"Eingabeüberwachung: {self.input_monitoring.label}"
+            f"Accessibility: {'granted' if self.accessibility else 'MISSING'} | "
+            f"Input Monitoring: {self.input_monitoring.label}"
         )
 
 
-def check() -> Permissions:
+def check(prompt: bool = False) -> Permissions:
     """Prüft beide Berechtigungen. Wirft nicht — Fehler werden zu ``DENIED``."""
     if sys.platform != "darwin":
         return Permissions(accessibility=True, input_monitoring=HIDAccess.GRANTED, checked=False)
@@ -81,10 +82,36 @@ def check() -> Permissions:
     accessibility = False
     try:
         apps = ctypes.cdll.LoadLibrary(_APPLICATION_SERVICES)
-        # WICHTIG: Boolean == 1 Byte. Ohne restype liest ctypes 4 Byte Müll.
-        apps.AXIsProcessTrusted.restype = ctypes.c_bool
-        apps.AXIsProcessTrusted.argtypes = []
-        accessibility = bool(apps.AXIsProcessTrusted())
+        if prompt:
+            try:
+                cf = ctypes.cdll.LoadLibrary(
+                    "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+                )
+                prompt_key = ctypes.c_void_p.in_dll(apps, "kAXTrustedCheckOptionPrompt").value
+                cf_true = ctypes.c_void_p.in_dll(cf, "kCFBooleanTrue").value
+                cf.CFDictionaryCreate.restype = ctypes.c_void_p
+                cf.CFDictionaryCreate.argtypes = [
+                    ctypes.c_void_p,
+                    ctypes.POINTER(ctypes.c_void_p),
+                    ctypes.POINTER(ctypes.c_void_p),
+                    ctypes.c_long,
+                    ctypes.c_void_p,
+                    ctypes.c_void_p,
+                ]
+                keys = (ctypes.c_void_p * 1)(prompt_key)
+                values = (ctypes.c_void_p * 1)(cf_true)
+                options = cf.CFDictionaryCreate(None, keys, values, 1, None, None)
+                apps.AXIsProcessTrustedWithOptions.restype = ctypes.c_bool
+                apps.AXIsProcessTrustedWithOptions.argtypes = [ctypes.c_void_p]
+                accessibility = bool(apps.AXIsProcessTrustedWithOptions(options))
+            except Exception:  # noqa: BLE001 — ctypes/CoreFoundation kann alles werfen
+                apps.AXIsProcessTrusted.restype = ctypes.c_bool
+                apps.AXIsProcessTrusted.argtypes = []
+                accessibility = bool(apps.AXIsProcessTrusted())
+        else:
+            apps.AXIsProcessTrusted.restype = ctypes.c_bool
+            apps.AXIsProcessTrusted.argtypes = []
+            accessibility = bool(apps.AXIsProcessTrusted())
     except OSError:
         accessibility = False
 

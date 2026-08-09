@@ -17,7 +17,8 @@ from flowtext.bundle import (
     BUNDLE_ENV_VAR,
     DEFAULT_BUNDLE_ID,
     LAUNCH_SCRIPT,
-    PYTHON_LINK,
+    PYTHON_NAME,
+    PYVENV_CFG,
     BundleSpec,
     build,
     codesign,
@@ -25,15 +26,25 @@ from flowtext.bundle import (
     info_plist,
     launcher_script,
     next_steps,
+    pyvenv_config,
     stub_source,
+    verify_bundle,
     verify_interpreter,
 )
 
 
 @pytest.fixture
 def spec(tmp_path: Path) -> BundleSpec:
+    """Ein ``.venv``-Abbild. ``build()`` kopiert den Interpreter, deshalb
+    muss die Datei wirklich existieren."""
+    venv = tmp_path / ".venv"
+    (venv / "bin").mkdir(parents=True)
+    python = venv / "bin" / "python3"
+    python.write_text("#!/bin/sh\n", encoding="utf-8")
+    python.chmod(0o755)
+    (venv / PYVENV_CFG).write_text("home = /opt/base/bin\nversion = 3.12.3\n", encoding="utf-8")
     return BundleSpec(
-        python=tmp_path / ".venv" / "bin" / "python3",
+        python=python,
         project=tmp_path / "flow-text",
         log_dir=tmp_path / "Logs" / "FlowText",
     )
@@ -105,7 +116,7 @@ class TestLauncherScript:
         dann nichts.
         """
         script = launcher_script(spec, tmp_path / "FlowText.app")
-        assert f'"$(dirname "$0")/{PYTHON_LINK}"' in script
+        assert f'"$(dirname "$0")/{PYTHON_NAME}"' in script
         assert str(spec.python) not in script
 
     def test_pythonpath_carries_the_dependencies(self, tmp_path: Path) -> None:
@@ -164,14 +175,44 @@ class TestBuild:
         build(spec, tmp_path / "dist")
         assert not stray.exists()
 
-    def test_bundle_does_not_copy_the_venv(self, spec: BundleSpec, tmp_path: Path) -> None:
-        """Der Kern der Idee: nichts einpacken, nur darauf zeigen."""
+    def test_bundle_stays_small(self, spec: BundleSpec, tmp_path: Path) -> None:
+        """Der Kern der Idee: nur das Startbinary, keine Bibliothek."""
         app = build(spec, tmp_path / "dist").app_path
-        real = [p for p in app.rglob("*") if p.is_file() and not p.is_symlink()]
-        assert len(real) == 3  # Info.plist + Stub + launch.sh
-        link = app / "Contents" / "MacOS" / PYTHON_LINK
-        assert link.is_symlink()
-        assert link.readlink() == spec.python
+        files = sorted(p.name for p in app.rglob("*") if p.is_file())
+        assert files == sorted(["Info.plist", "FlowText", LAUNCH_SCRIPT, PYTHON_NAME, PYVENV_CFG])
+
+    def test_interpreter_is_a_real_file_not_a_symlink(
+        self, spec: BundleSpec, tmp_path: Path
+    ) -> None:
+        """Regression: kein Menüleisten-Icon.
+
+        Einem Symlink folgt ``realpath`` zurück ins ``.venv`` und weiter zum
+        Basis-Interpreter. AppKit sähe den Prozess dann außerhalb der ``.app``
+        und ``NSStatusBar`` zeichnete nichts. Nur eine echte Datei im Bundle
+        hält die Bundle-Identität.
+        """
+        app = build(spec, tmp_path / "dist").app_path
+        interpreter = app / "Contents" / "MacOS" / PYTHON_NAME
+        assert interpreter.is_file()
+        assert not interpreter.is_symlink()
+        assert interpreter.read_bytes() == spec.python.read_bytes()
+
+    def test_pyvenv_cfg_travels_with_the_interpreter(
+        self, spec: BundleSpec, tmp_path: Path
+    ) -> None:
+        """Ohne sie findet die Kopie ihre Standardbibliothek nicht."""
+        app = build(spec, tmp_path / "dist").app_path
+        cfg = app / "Contents" / "MacOS" / PYVENV_CFG
+        assert "home = /opt/base/bin" in cfg.read_text(encoding="utf-8")
+
+    def test_pyvenv_cfg_is_synthesised_without_a_venv(self, tmp_path: Path) -> None:
+        """Ein Interpreter außerhalb eines ``.venv`` ist sein eigenes Zuhause."""
+        base = tmp_path / "bin"
+        base.mkdir()
+        python = base / "python3"
+        python.write_text("#!/bin/sh\n", encoding="utf-8")
+        spec = BundleSpec(python=python, project=tmp_path, log_dir=tmp_path)
+        assert f"home = {base}" in pyvenv_config(spec)
 
     def test_falls_back_to_the_script_without_a_compiler(
         self, spec: BundleSpec, tmp_path: Path, monkeypatch
@@ -186,6 +227,26 @@ class TestBuild:
 
 
 # ---------------------------------------------------------------- Signatur/Doku
+
+
+class TestVerifyBundle:
+    """Die Kopie kann kaputt sein, ohne dass man es beim Bauen merkt."""
+
+    def test_refuses_outside_macos(self, monkeypatch, tmp_path: Path) -> None:
+        from flowtext import bundle
+
+        monkeypatch.setattr(bundle.sys, "platform", "linux")
+        ok, message = verify_bundle(tmp_path / "FlowText.app", tmp_path, None)
+        assert ok is False
+        assert "macOS" in message
+
+    def test_reports_a_missing_interpreter(self, monkeypatch, tmp_path: Path) -> None:
+        from flowtext import bundle
+
+        monkeypatch.setattr(bundle.sys, "platform", "darwin")
+        ok, message = verify_bundle(tmp_path / "FlowText.app", tmp_path, None)
+        assert ok is False
+        assert "fehlt" in message
 
 
 def test_codesign_refuses_outside_macos(monkeypatch, tmp_path: Path) -> None:

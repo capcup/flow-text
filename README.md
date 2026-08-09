@@ -104,7 +104,6 @@ macOS has strict security settings for reading keyboard shortcuts and accessing 
 Instead of keeping a Terminal window open, FlowText can live in your menu bar:
 
 ```bash
-pip install 'rumps>=0.4.0'
 python -m flowtext --menubar
 ```
 
@@ -159,7 +158,8 @@ FlowText.app/Contents/
 ├── Info.plist        Bundle ID, LSUIElement, microphone reason
 └── MacOS/
     ├── FlowText      tiny native arm64 binary (CFBundleExecutable)
-    ├── python3       symlink → your .venv interpreter
+    ├── python3       copy of your interpreter's launcher binary (~10 kB)
+    ├── pyvenv.cfg    makes that copy a valid virtual environment
     └── launch.sh     zsh script → ./python3 -m flowtext --menubar
 ```
 
@@ -170,11 +170,16 @@ FlowText.app/Contents/
 | Ad-hoc signature (`codesign -s -`) | Without a signature, macOS identifies the app by content hash and forgets your permission on every rebuild |
 | **Native binary entry point** | macOS cannot read a CPU architecture from a text file. With a shell script as the entry point it assumes x86_64 and demands Rosetta — launch fails with **error -10669** |
 | Unresolved `.venv` symlink | `.venv/bin/python3` is a symlink to your base interpreter. Resolving it bypasses the virtual environment and no dependency is found |
-| **Interpreter must live inside the bundle** | AppKit derives `[NSBundle mainBundle]` from the running executable's path. Pointing straight at `.venv/bin/python3` puts the process *outside* `FlowText.app` after `exec` — permissions still work, but `NSStatusBar` draws **no menu bar icon**. Hence the `python3` symlink inside `MacOS/`, with dependencies supplied via `PYTHONPATH` |
+| **Interpreter must be a real file inside the bundle** | AppKit derives `[NSBundle mainBundle]` from the *resolved* path of the running executable. Pointing straight at `.venv/bin/python3` puts the process outside `FlowText.app` after `exec` — and a symlink is no better, because `realpath` follows it back out to your base interpreter. Either way the app loses its bundle identity and `NSStatusBar` draws **no menu bar icon**. So the launcher binary is *copied* in, with a `pyvenv.cfg` beside it (exactly what `python -m venv --copies` produces) and dependencies supplied via `PYTHONPATH` |
 
-`tools/make_app.py` handles all of these, and verifies up front that the chosen
-interpreter can actually import FlowText and its dependencies. If you rebuild the app,
-macOS may still reset the permission — just approve it once more.
+`tools/make_app.py` handles all of these. It verifies up front that the chosen
+interpreter can import FlowText and its dependencies, and afterwards that the *copy
+inside the finished bundle* still starts. If you rebuild the app, macOS may reset the
+permission — just approve it once more.
+
+> **Rebuild after a Python update.** The bundle tracks your source code live, but the
+> interpreter is a copy. Upgrade Python or recreate `.venv`, and you need to run
+> `python tools/make_app.py` again.
 
 If the app doesn't launch, the reason is in `~/Library/Logs/FlowText/launcher.log`.
 </details>
@@ -243,6 +248,7 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 | **Do I need Ollama installed?** | No! | FlowText runs 100% standalone with Whisper by default (`refiner = "none"`). |
 | **I don't want Terminal to read my keystrokes** | Permissions belong to whichever app starts FlowText. | Build the standalone app: `python tools/make_app.py` (see Step 7), then switch the permissions off for Terminal. |
 | **App bundle won't start** | Wrong project path, or the `.venv` moved. | Check `~/Library/Logs/FlowText/launcher.log`, then rebuild with `python tools/make_app.py`. |
+| **App blocked by Gatekeeper (`spctl: rejected`)** | macOS blocks ad-hoc signed `.app` bundles from running via LaunchServices / Finder. | Run `xattr -cr dist/FlowText.app && codesign --force --deep --sign - dist/FlowText.app && spctl --add dist/FlowText.app` to clear quarantine and authorize. |
 | **`error -10669` when opening the app** | Missing Command Line Tools, so no native entry point could be compiled — macOS then wants Rosetta. | `xcode-select --install`, then rebuild. Fallback: `softwareupdate --install-rosetta --agree-to-license` |
 
 ---

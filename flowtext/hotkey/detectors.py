@@ -106,7 +106,7 @@ class ComboDetector:
         self._armed = True
 
     def describe(self) -> str:
-        return f"Kombination {self._combo_text}"
+        return f"Combo {self._combo_text}"
 
     def on_press(self, name: str, now: float) -> bool:
         self._pressed.add(name)
@@ -164,7 +164,7 @@ class DoubleTapDetector:
         return bool(self._key in MODIFIERS and GENERIC.get(name) == self._key)
 
     def describe(self) -> str:
-        return f"Doppel-Tap auf {self._key} (Fenster {self._window:.2f}s)"
+        return f"Double-tap {self._key} (window {self._window:.2f}s)"
 
     def on_press(self, name: str, now: float) -> bool:
         if not self._matches(name):

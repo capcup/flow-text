@@ -48,7 +48,7 @@ class MlxTranscriber:
     def warmup(self) -> None:
         """Lädt das Modell, indem einmal Stille transkribiert wird."""
         started = time.perf_counter()
-        log.info("Lade Whisper-Modell %s …", self._model)
+        log.info("Loading Whisper model %s …", self._model)
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 silence = Path(tmp) / "warmup.wav"
@@ -56,13 +56,13 @@ class MlxTranscriber:
                 self._transcribe_file(silence)
         except Exception as exc:  # noqa: BLE001 — Warmup darf den Start nie verhindern
             log.warning(
-                "Warmup fehlgeschlagen (%s). Das Modell wird beim ersten Diktat geladen, "
-                "das dauert dann einige Sekunden.",
+                "Warmup failed (%s). The model will be loaded on first dictation, "
+                "which may take several seconds.",
                 exc,
             )
             return
         self._ready = True
-        log.info("Whisper-Modell bereit (%.1fs).", time.perf_counter() - started)
+        log.info("Whisper model ready (%.1fs).", time.perf_counter() - started)
 
     def transcribe(self, audio_path: Path) -> TranscriptionResult:
         started = time.perf_counter()
