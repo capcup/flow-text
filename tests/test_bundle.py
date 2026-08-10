@@ -358,9 +358,17 @@ class TestVerifyInterpreter:
         assert ok is False
         assert "nicht gefunden" in message
 
-    def test_interpreter_without_dependencies(self, tmp_path: Path) -> None:
+    def test_interpreter_without_dependencies(self, tmp_path: Path, monkeypatch) -> None:
+        import subprocess
         import sys as _sys
 
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(
+                args=args[0], returncode=1, stderr="ModuleNotFoundError: No module named 'rumps'"
+            ),
+        )
         ok, message = verify_interpreter(Path(_sys.executable), tmp_path)
         assert ok is False
         assert "rumps" in message or "ModuleNotFoundError" in message

@@ -12,14 +12,10 @@ Suchreihenfolge (erste Treffer gewinnen, Werte werden gemergt):
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover — nur für ältere Interpreter/CI
-    import tomli as tomllib  # type: ignore[no-redef]
 
 APP_NAME = "FlowText"
 

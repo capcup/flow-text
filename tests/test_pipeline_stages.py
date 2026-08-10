@@ -41,6 +41,8 @@ class TestFactory:
         """Fehlt mlx-whisper, muss das beim START auffallen — nicht erst
         beim ersten Diktat, wenn der Import tief in der Stufe passiert."""
         monkeypatch.setitem(sys.modules, "pyperclip", None)
+        monkeypatch.setitem(sys.modules, "mlx_whisper", None)
+        monkeypatch.setitem(sys.modules, "ollama", None)
         cfg = PipelineConfig(transcriber="mlx", refiner="ollama", injector="clipboard")
         with caplog.at_level("ERROR", logger="flowtext.pipeline.factory"):
             pipe = build_pipeline(cfg)

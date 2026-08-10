@@ -348,8 +348,7 @@ class TestPermissionState:
                 menubar.LOCKED_ICON
             )
             assert (
-                menubar.label_for(state, paused=True, permissions_ok=False)
-                == "Permissions missing"
+                menubar.label_for(state, paused=True, permissions_ok=False) == "Permissions missing"
             )
 
     def test_starts_and_shows_the_lock(self, rumps_module, monkeypatch, tmp_path) -> None:

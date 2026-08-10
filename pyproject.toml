@@ -1,6 +1,6 @@
 [project]
 name = "flowtext"
-version = "1.5.4"
+version = "1.5.6"
 description = "Lokale Voice-to-Text-Engine für macOS (Apple Silicon)"
 requires-python = ">=3.11"
 dependencies = [
