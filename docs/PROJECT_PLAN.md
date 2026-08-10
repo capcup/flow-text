@@ -1,115 +1,119 @@
 # PROJECT PLAN: FlowText (Local Voice-to-Text Engine)
 
-## 1. Project Purpose & Vision
-**FlowText** is an ultra-fast, 100% local voice-to-text and dictation application for macOS (optimized for Apple Silicon / M-series chips, specifically Mac Mini M4 with 16 GB RAM).
-Similar to *Superwhisper*, FlowText enables seamless voice dictation into any application via a global keyboard shortcut.
+> This file replaces the earlier `PROJECT_PLAN.md` and
+> `ANALYSE_UND_UMSETZUNGSPLAN.md` (deleted 2026-08-10). Those documents
+> tracked the project from a broken 289-line prototype through the fixes
+> that made it work — that work is done and the history lives in `git log`.
+> This file describes the **current** system and its **current** roadmap
+> only. Known tooling/housekeeping issues live separately in `FIXES.md`.
 
-### Core Principles:
-* **Zero Cloud Dependency**: No data ever leaves your local Mac. Maximum privacy.
-* **Apple Silicon Native Performance**: Uses Apple's MLX Framework (`mlx-whisper`) for hardware-accelerated inference on Neural Engine / GPU cores.
-* **Modular Event Architecture**: Decoupling audio recording, STT transcription, LLM refinement, and output injection.
+## 1. Vision & Principles
 
----
+**FlowText** is an ultra-fast, 100% local voice-to-text and dictation
+application for macOS (Apple Silicon), enabling seamless voice dictation
+into any application via a global keyboard shortcut.
 
-## 2. Tech Stack (100% Local)
+- **Zero Cloud Dependency** — no audio or text ever leaves the Mac.
+- **Apple Silicon Native** — `mlx-whisper` for hardware-accelerated inference.
+- **Modular Event Architecture** — recording, transcription, refinement, and
+  injection are decoupled stages behind `Protocol` interfaces.
 
-| Component | Library / Tool | Purpose |
+## 2. Tech Stack
+
+| Component | Library | Purpose |
 | :--- | :--- | :--- |
-| **Hotkey System** | `pynput` | Global system hotkeys under macOS (Toggle Start/Stop) |
-| **Audio I/O** | `sounddevice` | Microphone stream & buffer handling |
-| **Audio Storage** | `soundfile` | Export audio data as uncompressed `.wav` files |
-| **STT Engine** | `mlx-whisper` | Apple's MLX inference engine for Whisper (`whisper-large-v3-turbo` / medium) |
-| **LLM Engine** | `ollama` (Python SDK) | Local text refinement & punctuation correction via Ollama (e.g., `qwen2.5:7b` / `llama3.2`) |
-| **System Injection**| `pyperclip`, `pynput` | Write transcription to clipboard and trigger automated paste (`Cmd+V`) |
+| Hotkey | `pynput` | Global macOS event tap (double-tap / combo trigger) |
+| Audio I/O | `sounddevice` | Microphone stream & buffering |
+| Audio Storage | `soundfile` | WAV export |
+| STT | `mlx-whisper` | Apple MLX Whisper inference |
+| LLM refinement (optional) | `ollama` | Local punctuation/grammar cleanup |
+| Injection | `pyperclip` + `pynput` | Clipboard + simulated `Cmd+V` |
+| Menu bar | `rumps` | Status icon UI |
 
----
-
-## 3. Modular Architecture
+## 3. Architecture
 
 ```
-+-------------------+      Hotkey Event      +-----------------------+
-|  pynput Hotkey    | ---------------------> | AudioRecorder Module  |
-|  (Global Listener)|                        | (sounddevice/soundfile|
-+-------------------+                        +-----------------------+
-                                                         |
-                                             Recording Finished Event
-                                             (temp_audio.wav path)
-                                                         v
-                                             +-----------------------+
-                                             |  Event Hook Handler   |
-                                             +-----------------------+
-                                                         |
-                                 +-----------------------+-----------------------+
-                                 | (Future Step 2)                               | (Future Step 2)
-                                 v                                               v
-                     +-----------------------+                       +-----------------------+
-                     | MLX-Whisper Engine    |                       | Ollama LLM Service    |
-                     +-----------------------+                       +-----------------------+
-                                                                                 |
-                                                                                 v
-                                                                     +-----------------------+
-                                                                     | Output Injector       |
-                                                                     | (pyperclip/pynput)    |
-                                                                     +-----------------------+
+flowtext/
+├── __main__.py          CLI entry point, argument parsing
+├── app.py                FlowTextApp — wires hotkey, recorder, pipeline
+├── state.py               State enum + thread-safe StateMachine
+├── config.py               dataclasses, TOML loading, validation
+├── permissions.py           Accessibility / Input Monitoring checks
+├── diagnostics.py            shared logic for --watch-keys / tools/diagnose.py
+├── feedback.py                 sound feedback (afplay)
+├── logging_setup.py             console + rotating file logging
+├── menubar.py                    rumps status-bar UI
+├── bundle.py                      FlowText.app launcher-bundle builder
+├── audio/
+│   ├── recorder.py                deadlock-free AudioRecorder (queue-based)
+│   └── devices.py                  input device listing
+├── hotkey/
+│   ├── service.py                   HotkeyService: event tap + supervisor
+│   ├── detectors.py                  DoubleTapDetector, ComboDetector (pure logic)
+│   └── keynames.py                    pynput key → canonical name
+└── pipeline/
+    ├── base.py                        Transcriber / Refiner / Injector protocols
+    ├── factory.py                      builds the pipeline from config
+    ├── transcribe_mlx.py                mlx-whisper transcription
+    ├── refine_ollama.py                  Ollama-based text refinement
+    ├── inject_macos.py                    clipboard + Cmd+V injection
+    └── stub.py                             no-op stages for dry runs / tests
 ```
 
----
+### Threading model
 
-## 4. Iterative Roadmap
+The one rule that matters: **the event-tap callback must return in under
+1 ms.** macOS permanently disables a `CGEventTap` that's too slow to
+respond, and pynput never re-enables it.
 
-### Version 1.0 (MVP Step 1) - Completed
-- [x] Basic project structure & `.venv` setup
-- [x] `PROJECT_PLAN.md` & `requirements.txt`
-- [x] Background loop & `pynput` global hotkey listener
-- [x] Audio recording stream via `sounddevice` with toggle logic
-- [x] Storage of temporary audio files via `soundfile`
-- [x] Modular event callback interface prepared for STT pipeline
+```
+Event-Tap Thread    → queue.put_nowait only              (< 1 ms, hard rule)
+Controller Thread    → state machine, start/stop recording
+Worker Thread          → transcription, LLM, injection    (may take seconds)
+Supervisor Thread        → restarts the listener if it dies
+PortAudio Callback         → queue.put_nowait only        (no locks)
+```
 
-### Version 1.1 (Stabilization & Modularization) - Completed
-> Details & Rationale: [`ANALYSE_UND_UMSETZUNGSPLAN.md`](ANALYSE_UND_UMSETZUNGSPLAN.md)
+### State machine
 
-- [x] Git repository, `.gitignore`, `pyproject.toml`
-- [x] Non-blocking hotkey callback (avoid event tap timeout)
-- [x] Supervisor thread with `join()` — no silent listener deaths
-- [x] Collision-free trigger: double-tap Command key instead of `Ctrl+Option+Space`
-- [x] Correct permissions check (`c_bool` restype **and** `IOHIDCheckAccess`)
-- [x] Deadlock-free `AudioRecorder` (queue instead of lock inside audio callback)
-- [x] Min/max recording duration, device error handling, temp files in Application Support
-- [x] Package structure `flowtext/`, state machine, `config.toml`
-- [x] Audio feedback, rotating log file
-- [x] `tools/diagnose.py`, automated tests, `ruff` + `mypy --strict`
-- [x] Conflict detection for occupied triggers (Claude for Mac, macOS system shortcuts)
-- [x] Event watchdog + `--watch-keys`: missing permissions report themselves
-- [x] Centralized diagnostics in `flowtext/diagnostics.py`, identifying responsible app
+```
+IDLE ─(trigger)→ RECORDING ─(trigger|timeout)→ PROCESSING ─→ IDLE
+                                                    │
+                                                 ERROR ─→ IDLE
+```
 
-### Version 1.3 (MVP Step 2) - Completed
-- [x] Integration of `mlx-whisper` (load model during warmup, fixed language setting)
-- [x] Connection of local `ollama` library for text formatting
-      (reachability check on startup, fallback to raw transcript)
-- [x] Text injection into active window via `pyperclip` + `pynput` (`Cmd+V`),
-      including saving and restoring clipboard state
-- [x] System sound audio notifications (system sounds via `afplay`)
+Triggers in any state other than `IDLE`/`RECORDING` are dropped
+(single-flight — no overlapping recordings or pipeline runs).
 
-### Version 1.4 - UX & Performance Refinements
-- [x] Menu bar app via `rumps` with status icon, pause, and quick actions
-- [x] `FlowText.app` launcher bundle (`tools/make_app.py`): standalone TCC identity,
-      eliminating the need to give Terminal Accessibility/Input Monitoring rights
-- [x] **Test Requirement:** Gatekeeper & LaunchServices validation (`spctl -a -vvv -t exec dist/FlowText.app` passed; launch via `open dist/FlowText.app` or Finder without block)
-- [ ] Push-to-Talk as an alternative to toggle mode
-- [ ] Stream/chunk-based buffer management
-- [ ] Dynamic Whisper model selection (`tiny`, `base`, `small`, `large-v3-turbo`)
-- [ ] Configurable system prompts for Ollama (e.g. "Format as bullet points", "Correct grammar")
+## 4. macOS Permissions
 
----
+FlowText needs two TCC permissions, granted to whichever app *launches* it
+(Terminal, or `FlowText.app` if built via `tools/make_app.py`):
 
-## 5. Important macOS Permissions (Accessibility & Microphone)
+1. **Accessibility** — required for `pynput` to listen globally and simulate
+   `Cmd+V`.
+2. **Input Monitoring** — mandatory for the session-level event tap
+   (`kTCCServiceListenEvent`); `AXIsProcessTrusted()` alone doesn't cover it.
+3. **Microphone** — required for `sounddevice`.
 
-Due to macOS security architecture, Python / Terminal requires the following permissions in System Settings (**System Settings -> Privacy & Security**):
+`python tools/diagnose.py` checks all three and reports what's missing.
+Recommended: `python tools/make_app.py` builds `FlowText.app`, giving
+FlowText its own TCC identity so Terminal doesn't need these permissions.
 
-1. **Accessibility**: Required for `pynput` to listen to global hotkeys and to simulate `Cmd+V`.
-2. **Microphone**: Required for `sounddevice` to capture microphone input.
-3. **Input Monitoring**: **Mandatory**, not optional. Session-level event taps require `kTCCServiceListenEvent`; `AXIsProcessTrusted()` alone does not cover this.
+## 5. Current Status (2026-08-10)
 
-**Important:** Permission belongs to the *launching app* (Terminal.app, iTerm2, VS Code, Cursor) — not to the Python binary itself. After granting permissions, completely quit the app with **`Cmd+Q`** and restart it. `python tools/diagnose.py` checks all three permissions and reports what is missing.
+The core pipeline (hotkey → record → transcribe → optionally refine → inject)
+and the menu-bar / app-bundle infrastructure are **complete and stable**.
+223 automated tests, `ruff` and `mypy --strict` clean. No feature work is
+currently in flight — the previous roadmap
+(push-to-talk, streaming, model selection, prompt profiles, v2.0 items) was
+discarded on 2026-08-10 to make room for a fresh brainstorm rather than
+carrying forward an unreviewed backlog.
 
-**Recommended approach since v1.4:** `python tools/make_app.py` generates `FlowText.app`. This gives FlowText its *own* TCC identity — permissions then apply directly to FlowText, allowing Terminal to revoke its access. The bundle packs no external copies; it simply references your existing `.venv`.
+The one remaining housekeeping item — CI's first real run — is tracked in
+`FIXES.md`, not here.
+
+## 6. Roadmap
+
+_Intentionally empty — being redefined from scratch. See project
+conversation dated 2026-08-10._

@@ -1,6 +1,6 @@
 """Controller: verbindet Hotkey, Aufnahme und Pipeline.
 
-Threading-Modell (siehe ANALYSE_UND_UMSETZUNGSPLAN.md §5.2):
+Threading-Modell (siehe docs/PROJECT_PLAN.md §3 "Threading model"):
 
     Event-Tap-Thread   → nur ``queue.put_nowait``      (< 1 ms, Pflicht)
     Controller-Thread  → Zustandsautomat, Stream-Start/Stop
