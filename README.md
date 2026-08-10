@@ -53,8 +53,8 @@ python3 -m venv .venv
 # 4. Activate the environment
 source .venv/bin/activate
 
-# 5. Install all required dependencies
-pip install -r requirements.txt
+# 5. Install all required dependencies (or pip install -r requirements.txt)
+pip install -e ".[pipeline,menubar,dev]"
 ```
 
 ---
@@ -255,7 +255,7 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 
 ## 🧪 Developer Testing & Verification
 
-FlowText comes with a comprehensive test suite of 214 automated tests that run without requiring real microphone input or active macOS GUI permissions:
+FlowText comes with a comprehensive test suite of 223 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
 # Run test suite

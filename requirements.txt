@@ -1,20 +1,4 @@
-# Basis (Hotkey + Aufnahme) — reicht für Phase 3
-pynput>=1.8.2
-sounddevice>=0.5.0
-soundfile>=0.13.0
-numpy>=2.0
-# pynput braucht das unter macOS; explizit, damit die Abhängigkeit sichtbar ist
-pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
-
-# Pipeline (v1.1) — erst nötig, wenn pipeline.transcriber = "mlx"
-mlx-whisper>=0.4.1; sys_platform == "darwin"
-ollama>=0.4.0
-pyperclip>=1.9.0
-
-# Menüleisten-App (optional)
-rumps>=0.4.0; sys_platform == "darwin"
-
-# Entwicklung
-pytest>=8.0
-ruff>=0.6
-mypy>=1.11
+# FlowText Dependencies
+# Note: pyproject.toml is the single source of truth for dependencies.
+# Installing this file installs the package along with all pipeline, menubar, and dev extras.
+-e .[pipeline,menubar,dev]
