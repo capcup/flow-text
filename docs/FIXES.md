@@ -1,30 +1,17 @@
-# FlowText — Open Fixes
+# FlowText — Fixes
 
-**Status 2026-08-10:** All previously documented issues have been fixed and
-verified. Current state, measured by actually running the tools:
+**Status 2026-08-10: no open items.** Everything documented here has been
+fixed and verified, both locally and in CI.
+
+Local state (Python 3.12 / arm64):
 
 - `ruff check` — clean
 - `ruff format --check` — 44 files, clean
 - `mypy` — 27 source files, no issues
 - `pytest` — 223 tests, all passing
 
-One item remains, and it can only be resolved by pushing.
-
----
-
-## 1. CI has never actually run
-
-- **Location:** `.github/workflows/ci.yml`
-- **Finding:** The workflow was added but never pushed, so its "green"
-  status is unproven. Two concrete risks:
-  - Every run installs `mlx-whisper` including `torch` (~2 GB) on a macOS
-    runner, which may be slow or flaky even with `cache: 'pip'`.
-  - Everything was verified locally on **Python 3.12 / arm64**; the CI
-    matrix also tests **3.11**, which is untested territory.
-- **Fix:** Push once and check the actual run. If it turns out too slow,
-  split into a fast job (ruff, mypy, tests with stub stages) and a separate,
-  less frequent job that installs the heavy pipeline extras.
-- **Effort:** Depends on the first real run.
+CI ([run #1](https://github.com/capcup/flow-text/actions/runs/31410682162),
+commit `bc56162`): **green on both Python 3.11 and 3.12**, 2:10 minutes total.
 
 ---
 
@@ -52,7 +39,9 @@ For the record — all verified, no action needed:
    `__init__.py` now reads the version via `importlib.metadata`.
 5. **Duplicated dependencies** — `requirements.txt` now delegates to
    `pyproject.toml` via `-e .[pipeline,menubar,dev]`; README updated.
-6. **No CI** — `.github/workflows/ci.yml` added.
+6. **No CI** — `.github/workflows/ci.yml` added: macOS runner, Python
+   3.11/3.12 matrix, running ruff, ruff format, mypy and pytest on every
+   push and pull request.
 7. **Orphaned packages** — the `PyAutoGUI` stack was removed from `.venv`.
 8. **CI checked less than the local run** — the workflow ran
    `mypy --strict flowtext` (25 files), skipping `tools/`. It now runs plain
@@ -63,6 +52,23 @@ Beyond the documented scope, `tests/test_bundle.py` was also made hermetic by
 mocking `subprocess.run` in `test_interpreter_without_dependencies` — the same
 class of fix as item 2.
 
+### CI: two predicted risks, both disproven
+
+Before the first run, two concerns were recorded here. The actual run
+settled both, so they are noted rather than carried forward:
+
+- **Python 3.11 was untested territory** (everything had been verified on
+  3.12 only). It passed, and was in fact the faster of the two jobs — 67s
+  versus 125s.
+- **The `torch` install was expected to make runs slow or flaky**, estimated
+  at "~2 GB per run". That estimate was wrong: it confused the installed
+  on-disk size of the local `.venv` (1.2 GB) with the download size, and
+  macOS arm64 wheels are far smaller than the CUDA Linux builds that figure
+  came from. Real dependency installation took 39s (3.11) and 78s (3.12).
+
+  Consequence: the previously suggested follow-up — splitting CI into a fast
+  job and a separate heavy one — is unnecessary. The single job is fine.
+
 ### Deliberately dropped: the lock file
 
 A `requirements.lock` was generated (via `pip freeze`) and then deleted again.
@@ -71,8 +77,7 @@ Reasoning, recorded so the question doesn't get reopened by accident:
 - Nothing consumed it. CI installs via `pip install -e ".[pipeline,menubar,dev]"`.
 - Wiring it into CI would conflict with the test matrix: the freeze came from
   Python 3.12 / arm64, while CI also tests 3.11. A dedicated lock job would
-  double CI runtime (another ~2 GB torch install) to validate a file nobody
-  needs.
+  add runtime to validate a file nobody needs.
 - It had no hashes and was platform-specific — it looked like reproducibility
   without providing it.
 - `pyproject.toml` already carries version floors, and the actual problem
@@ -84,5 +89,5 @@ outside contributors, a broken upstream release), the right tool is
 `uv lock` or `pip-compile` — a cross-platform, hash-pinned lock, not a
 `pip freeze` snapshot.
 
-**Checked, no fix needed:** `torch` (~1 GB) is a hard dependency of
-`mlx-whisper`, not removable bloat. `dist/` is correctly gitignored.
+**Checked, no fix needed:** `torch` is a hard dependency of `mlx-whisper`,
+not removable bloat. `dist/` is correctly gitignored.

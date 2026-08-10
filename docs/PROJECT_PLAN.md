@@ -110,8 +110,8 @@ currently in flight — the previous roadmap
 discarded on 2026-08-10 to make room for a fresh brainstorm rather than
 carrying forward an unreviewed backlog.
 
-The one remaining housekeeping item — CI's first real run — is tracked in
-`FIXES.md`, not here.
+CI is green on both Python 3.11 and 3.12. There are no open housekeeping
+items; `FIXES.md` keeps the record of what was fixed and why.
 
 ## 6. Roadmap
 
