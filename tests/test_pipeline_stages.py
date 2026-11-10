@@ -46,6 +46,7 @@ class TestFactory:
         """Fehlt mlx-whisper, muss das beim START auffallen — nicht erst
         beim ersten Diktat, wenn der Import tief in der Stufe passiert."""
         monkeypatch.setitem(sys.modules, "pyperclip", None)
+        monkeypatch.setitem(sys.modules, "AppKit", None)
         monkeypatch.setitem(sys.modules, "mlx_whisper", None)
         monkeypatch.setitem(sys.modules, "ollama", None)
         cfg = PipelineConfig(transcriber="mlx", refiner="ollama", injector="clipboard")
@@ -330,6 +331,11 @@ class TestClipboardInjector:
             "pyperclip",
             _fake_module("pyperclip", copy=clipboard.copy, paste=clipboard.paste),
         )
+        # Nie die echte Zwischenablage des Rechners anfassen.
+        from flowtext.pipeline import inject_macos
+
+        monkeypatch.setattr(inject_macos, "_default_pasteboard", inject_macos.PyperclipPasteboard)
+        monkeypatch.setattr(inject_macos, "_PASTE_DELAY", 0.0)
         presses: list[str] = []
         monkeypatch.setattr(
             "flowtext.pipeline.inject_macos.ClipboardInjector._press_paste_shortcut",

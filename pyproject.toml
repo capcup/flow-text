@@ -9,6 +9,7 @@ dependencies = [
     "soundfile>=0.13.0",
     "numpy>=2.0",
     "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
@@ -63,7 +64,16 @@ files = ["flowtext", "tools"]
 
 # Diese Pakete liefern keine Type-Stubs mit.
 [[tool.mypy.overrides]]
-module = ["sounddevice", "soundfile", "pynput.*", "mlx_whisper", "ollama", "pyperclip", "rumps"]
+module = [
+    "sounddevice",
+    "soundfile",
+    "pynput.*",
+    "mlx_whisper",
+    "ollama",
+    "pyperclip",
+    "rumps",
+    "AppKit",
+]
 ignore_missing_imports = true
 
 # Tests dürfen pytest-Fixtures ohne Annotationen verwenden.

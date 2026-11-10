@@ -82,9 +82,9 @@ def _build_injector(cfg: PipelineConfig) -> Injector:
     if cfg.injector == "none":
         return LogInjector()
 
-    if not _available("pyperclip"):
+    if not (_available("AppKit") or _available("pyperclip")):
         log.error(
-            "pipeline.injector = 'clipboard', aber pyperclip fehlt. %s. "
+            "pipeline.injector = 'clipboard', aber weder AppKit noch pyperclip sind da. %s. "
             "Der Text landet nur im Log.",
             _INSTALL_HINT,
         )
