@@ -16,6 +16,7 @@ import sys
 
 from ..config import CleanupConfig, PipelineConfig
 from .base import Injector, Pipeline, Refiner, Transcriber
+from .guard import SpeechGuard
 from .stub import LogInjector, NullRefiner, StubTranscriber
 
 log = logging.getLogger(__name__)
@@ -115,4 +116,5 @@ def build_pipeline(cfg: PipelineConfig, cleanup: CleanupConfig | None = None) ->
         refiner=_build_refiner(cfg),
         injector=_build_injector(cfg),
         cleaner=_build_cleaner(cfg, cleanup),
+        guard=SpeechGuard(cfg.silence_threshold),
     )

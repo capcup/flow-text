@@ -46,6 +46,12 @@ whisper_model = "mlx-community/whisper-large-v3-turbo"
 # kurzen Diktaten hält Whisper "Danke." sonst gern für Englisch.
 language = "de"
 
+# Stille-Schwelle: liegt die lauteste Stelle der Aufnahme unter diesem Pegel
+# (0..1), wird nichts transkribiert und nichts eingefügt. Verhindert, dass
+# Whisper bei Stille "Vielen Dank." erfindet. Wird leise Sprache verschluckt:
+# Wert senken. 0 = aus. Der gemessene Pegel steht im Log.
+silence_threshold = 0.005
+
 # Eigennamen und Fachbegriffe, die Whisper richtig schreiben soll. Nur
 # eintragen, was sonst falsch erkannt wird, und kurz halten (max. ~50-100
 # Begriffe). Es ist ein Hinweis, keine Garantie; für feste Korrekturen

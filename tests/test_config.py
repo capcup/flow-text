@@ -236,3 +236,15 @@ class TestVocabularyAndReplacements:
     def test_wrong_types_are_rejected(self, tmp_path: Path, body: str) -> None:
         with pytest.raises(ConfigError, match=r"vocabulary|replacements"):
             load(_write(tmp_path, body + "\n"))
+
+
+class TestSilenceThreshold:
+    def test_default_and_toml(self, tmp_path: Path) -> None:
+        assert Config().pipeline.silence_threshold == 0.005
+        cfg = load(_write(tmp_path, "[pipeline]\nsilence_threshold = 0\n"))
+        assert cfg.pipeline.silence_threshold == 0
+
+    @pytest.mark.parametrize("value", ['"0.01"', "true", "-0.1"])
+    def test_invalid_values_are_rejected(self, tmp_path: Path, value: str) -> None:
+        with pytest.raises(ConfigError, match="silence_threshold"):
+            load(_write(tmp_path, f"[pipeline]\nsilence_threshold = {value}\n"))

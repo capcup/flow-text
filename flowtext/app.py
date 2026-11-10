@@ -25,6 +25,7 @@ from .hotkey.detectors import Signal
 from .hotkey.service import HotkeyService
 from .pipeline.base import Pipeline
 from .pipeline.factory import build_pipeline
+from .pipeline.guard import speech_level
 from .state import State, StateMachine
 
 log = logging.getLogger(__name__)
@@ -272,10 +273,11 @@ class FlowTextApp:
 
         self.state.transition(State.PROCESSING)
         log.info(
-            "🛑 Recording stopped (%s): %.2fs, peak %.3f.",
+            "🛑 Recording stopped (%s): %.2fs, peak %.3f, speech level %.4f.",
             reason,
             recording.duration,
             recording.peak,
+            speech_level(recording),
         )
         if recording.peak < 0.001:
             log.warning("Audio signal is practically silent — wrong input device?")

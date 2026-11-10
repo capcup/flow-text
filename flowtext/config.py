@@ -104,6 +104,11 @@ class PipelineConfig:
     #: Feste Sprache statt Auto-Erkennung — schneller und zuverlässiger.
     language: str = "de"
 
+    #: Aufnahmen, deren lauteste Stelle unter diesem Pegel (RMS, 0..1) liegt,
+    #: gelten als Stille und werden nicht transkribiert — Whisper erfindet
+    #: sonst Text ("Vielen Dank."). ``0`` schaltet die Prüfung ab.
+    silence_threshold: float = 0.005
+
     #: Eigennamen und Fachbegriffe, die Whisper als Vortext bekommt, damit es
     #: sie richtig schreibt. Kurz halten (Budget ~224 Tokens). Nur ein Hinweis;
     #: für feste Korrekturen gibt es ``cleanup.replacements``.
@@ -283,6 +288,9 @@ def validate(cfg: Config) -> None:
     extras = cfg.cleanup.extra_fillers
     if not isinstance(extras, list) or not all(isinstance(w, str) for w in extras):
         raise ConfigError("cleanup.extra_fillers muss eine Liste von Wörtern sein")
+    threshold = cfg.pipeline.silence_threshold
+    if isinstance(threshold, bool) or not isinstance(threshold, int | float) or threshold < 0:
+        raise ConfigError("pipeline.silence_threshold muss eine Zahl >= 0 sein")
     vocabulary = cfg.pipeline.vocabulary
     if not isinstance(vocabulary, list) or not all(isinstance(w, str) for w in vocabulary):
         raise ConfigError("pipeline.vocabulary muss eine Liste von Begriffen sein")

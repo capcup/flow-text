@@ -10,9 +10,12 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..audio.recorder import Recording
+
+if TYPE_CHECKING:
+    from .guard import SpeechGuard
 
 log = logging.getLogger(__name__)
 
@@ -66,8 +69,11 @@ class Pipeline:
         injector: Injector | None = None,
         *,
         cleaner: Refiner | None = None,
+        guard: SpeechGuard | None = None,
     ) -> None:
         self.transcriber = transcriber
+        #: Verhindert, dass Stille zu erfundenem Text wird.
+        self.guard = guard
         #: Regelbasierte Bereinigung; läuft vor der (langsameren) Verfeinerung.
         self.cleaner = cleaner
         self.refiner = refiner
@@ -107,8 +113,13 @@ class Pipeline:
 
     def run(self, recording: Recording) -> str:
         started = time.perf_counter()
+        if self.guard is not None and self.guard.is_silent(recording):
+            return ""
+
         result = self.transcriber.transcribe(recording)
         text = result.text.strip()
+        if text and self.guard is not None and self.guard.is_phantom(text, recording):
+            return ""
         log.info(
             "Transcribed in %.2fs: %r",
             time.perf_counter() - started,

@@ -208,6 +208,7 @@ min_seconds = 0.3          # Recordings shorter than 0.3s are ignored
 transcriber = "mlx"       # Uses mlx-whisper (or "stub" for dry-runs)
 whisper_model = "mlx-community/whisper-large-v3-turbo"
 language = "de"           # Language code ("de", "en", "fr", "es", etc.)
+silence_threshold = 0.005 # Recordings quieter than this are not transcribed (0 = off)
 # vocabulary = ["FlowText", "Ollama"]   # Names/terms Whisper should spell correctly (a hint, keep it short)
 refiner = "none"          # Standalone default ("none"). Set to "ollama" if desired.
 injector = "clipboard"    # Copies text and performs Cmd+V
