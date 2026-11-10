@@ -25,13 +25,14 @@ import time
 from typing import Any
 
 from ..config import HotkeyConfig
-from .detectors import TriggerDetector, build_detector
+from .detectors import Signal, TriggerDetector, build_detector
 from .keynames import normalize
 
 log = logging.getLogger(__name__)
 
-#: Sentinel, der bei Auslösung in die Event-Queue gelegt wird.
-TRIGGER = "trigger"
+#: Der klassische Auslöser (Start/Stopp). Daneben gibt es im frühen Startmodus
+#: ``Signal.START`` und ``Signal.CANCEL`` — alles läuft über dieselbe Queue.
+TRIGGER = Signal.CONFIRM
 
 #: Ab dieser Callback-Dauer wird gewarnt (Tap-Timeout-Frühwarnung).
 _SLOW_CALLBACK_SECONDS = 0.005
@@ -80,6 +81,7 @@ class HotkeyService:
             tap_key=cfg.tap_key,
             double_tap_window=cfg.double_tap_window,
             max_tap_duration=cfg.max_tap_duration,
+            early_start=cfg.early_start,
         )
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -213,6 +215,7 @@ class HotkeyService:
                 tap_key=self._cfg.tap_key,
                 double_tap_window=self._cfg.double_tap_window,
                 max_tap_duration=self._cfg.max_tap_duration,
+                early_start=self._cfg.early_start,
             )
 
     # ------------------------------------------------------- Event-Callbacks
@@ -233,17 +236,23 @@ class HotkeyService:
                 return
             now = started
             with self._lock:
-                fired = (
+                signal = (
                     self._detector.on_press(name, now)
                     if press
                     else self._detector.on_release(name, now)
                 )
             if log.isEnabledFor(logging.DEBUG):
-                log.debug("%s %s%s", "↓" if press else "↑", name, "  ← AUSGELÖST" if fired else "")
-            if fired:
-                self._trigger_count += 1
+                log.debug(
+                    "%s %s%s",
+                    "↓" if press else "↑",
+                    name,
+                    f"  ← {signal.name}" if signal is not Signal.NONE else "",
+                )
+            if signal is not Signal.NONE:
+                if signal is Signal.CONFIRM:
+                    self._trigger_count += 1
                 try:
-                    self._events.put_nowait(TRIGGER)
+                    self._events.put_nowait(signal)
                 except queue.Full:
                     self._dropped += 1
         except Exception:

@@ -343,7 +343,7 @@ def test_simulated_paste_does_not_trigger_the_hotkey() -> None:
     Die Sequenz cmd↓ v↓ v↑ cmd↑ darf keinen Doppel-Tap ergeben — sonst
     startet FlowText direkt nach dem Einfügen eine neue Aufnahme.
     """
-    from flowtext.hotkey.detectors import DoubleTapDetector
+    from flowtext.hotkey.detectors import DoubleTapDetector, Signal
 
     detector = DoubleTapDetector("cmd")
     fired = [
@@ -352,10 +352,10 @@ def test_simulated_paste_does_not_trigger_the_hotkey() -> None:
         detector.on_release("v", 0.02),
         detector.on_release("cmd_l", 0.03),
     ]
-    assert fired == [False, False, False, False]
+    assert fired == [Signal.NONE] * 4
 
     # …und direkt danach muss ein echter Doppel-Tap wieder greifen.
     detector.on_press("cmd_l", 1.00)
-    assert detector.on_release("cmd_l", 1.03) is False
+    assert detector.on_release("cmd_l", 1.03) is Signal.NONE
     detector.on_press("cmd_l", 1.15)
-    assert detector.on_release("cmd_l", 1.18) is True
+    assert detector.on_release("cmd_l", 1.18) is Signal.CONFIRM

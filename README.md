@@ -93,7 +93,7 @@ macOS has strict security settings for reading keyboard shortcuts and accessing 
    ```
 
 ### 🎙️ How to Dictate:
-* **Start Recording:** Double-tap the **`⌘` Command key** (press it twice quickly). You will hear a short sound and see the menu bar icon turn red 🔴.
+* **Start Recording:** Double-tap the **`⌘` Command key** (press it twice quickly). You will hear a short sound and see the menu bar icon turn red 🔴. (With `early_start = true` the microphone already opens on the second key *press*, so you can start speaking right away; the sound follows on release. If it turns out not to be a double-tap — e.g. you hold ⌘ or press `⌘V` — the short recording is discarded silently.)
 * **Speak:** Dictate your text into your microphone.
 * **Stop Recording:** Double-tap the **`⌘` Command key** again. FlowText will transcribe your speech and automatically paste the text into your active app!
 
@@ -160,7 +160,7 @@ FlowText.app/Contents/
     ├── FlowText      tiny native arm64 binary (CFBundleExecutable)
     ├── python3       copy of your interpreter's launcher binary (~10 kB)
     ├── pyvenv.cfg    makes that copy a valid virtual environment
-    └── launch.sh     zsh script → ./python3 -m flowtext --menubar
+    └── launch.sh     fallback only: zsh script → ./python3 -m flowtext --menubar
 ```
 
 | Detail | Why it matters |
@@ -171,6 +171,7 @@ FlowText.app/Contents/
 | **Native binary entry point** | macOS cannot read a CPU architecture from a text file. With a shell script as the entry point it assumes x86_64 and demands Rosetta — launch fails with **error -10669** |
 | Unresolved `.venv` symlink | `.venv/bin/python3` is a symlink to your base interpreter. Resolving it bypasses the virtual environment and no dependency is found |
 | **Interpreter must be a real file inside the bundle** | AppKit derives `[NSBundle mainBundle]` from the *resolved* path of the running executable. Pointing straight at `.venv/bin/python3` puts the process outside `FlowText.app` after `exec` — and a symlink is no better, because `realpath` follows it back out to your base interpreter. Either way the app loses its bundle identity and `NSStatusBar` draws **no menu bar icon**. So the launcher binary is *copied* in, with a `pyvenv.cfg` beside it (exactly what `python -m venv --copies` produces) and dependencies supplied via `PYTHONPATH` |
+| **No `exec` in the entry point (macOS 26)** | If the entry binary replaces itself via `exec` (stub → `zsh` → Python), macOS 26 draws **no menu bar icon** even though the app runs fine. So the stub *embeds* Python: it `dlopen`s `libpython` and calls `Py_BytesMain`, and the process stays the `FlowText` binary throughout. This needs a Python built with a shared library (`--enable-shared`); `make_app.py` self-tests the result and otherwise falls back to the `exec` chain and tells you |
 
 `tools/make_app.py` handles all of these. It verifies up front that the chosen
 interpreter can import FlowText and its dependencies, and afterwards that the *copy
@@ -196,6 +197,7 @@ mode = "double_tap"       # Options: "double_tap" or "combo"
 tap_key = "cmd"           # Options: "cmd", "shift_r", "ctrl_r", "alt_l"
 double_tap_window = 0.40  # Time allowed between two taps (seconds)
 max_tap_duration = 0.35   # Maximum tap hold duration
+early_start = true        # Open the mic on the 2nd key *press* so the first words aren't cut off
 
 [audio]
 sample_rate = 16000

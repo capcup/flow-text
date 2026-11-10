@@ -11,6 +11,7 @@ from flowtext import app as app_module
 from flowtext.app import FlowTextApp
 from flowtext.audio.recorder import AudioError, Recording
 from flowtext.config import Config
+from flowtext.hotkey.detectors import Signal
 from flowtext.state import State
 
 
@@ -22,8 +23,11 @@ class FakeRecorder:
         self.elapsed = 0.0
         self.saved: list[Path] = []
         self.aborted = False
+        self.start_calls = 0
+        self.abort_calls = 0
 
     def start(self) -> None:
+        self.start_calls += 1
         if self.start_error:
             raise self.start_error
         self.is_recording = True
@@ -37,6 +41,8 @@ class FakeRecorder:
 
     def abort(self) -> None:
         self.aborted = True
+        self.abort_calls += 1
+        self.is_recording = False
 
     def save(self, recording: Recording, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,3 +171,107 @@ def test_full_queue_does_not_wedge_the_state(make_app) -> None:
     app._on_trigger()
     app._on_trigger()
     assert app.state.current is State.IDLE  # über ERROR zurück nach IDLE
+
+
+# ------------------------------------------------------------ früher Start
+
+
+def test_early_start_opens_microphone_without_changing_state(make_app) -> None:
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.START)
+    assert recorder.is_recording
+    assert app.state.current is State.IDLE  # noch keine Aufnahme im Sinne des Zustands
+
+
+def test_confirm_after_early_start_does_not_restart_recorder(make_app) -> None:
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.START)
+    app._on_signal(Signal.CONFIRM)
+    assert app.state.current is State.RECORDING
+    assert recorder.start_calls == 1  # das Mikrofon lief schon
+
+
+def test_cancel_after_early_start_discards_recording(make_app) -> None:
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.START)
+    app._on_signal(Signal.CANCEL)
+    assert recorder.abort_calls == 1
+    assert not recorder.is_recording
+    assert app.state.current is State.IDLE
+    assert app.jobs.qsize() == 0
+
+
+def test_cancel_without_early_start_is_noop(make_app) -> None:
+    """CANCEL während einer laufenden Aufnahme (Stopp-Doppel-Tap) darf nichts abbrechen."""
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.CONFIRM)  # klassischer Start
+    app._on_signal(Signal.CANCEL)
+    assert recorder.abort_calls == 0
+    assert app.state.current is State.RECORDING
+
+
+def test_start_while_recording_is_ignored(make_app) -> None:
+    """Der zweite Tap des Stopp-Doppel-Taps meldet ebenfalls START."""
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.CONFIRM)
+    app._on_signal(Signal.START)
+    assert recorder.start_calls == 1
+    app._on_signal(Signal.CONFIRM)  # Stopp
+    assert app.state.current is State.PROCESSING
+    assert app.jobs.qsize() == 1
+
+
+def test_early_start_ignored_while_paused(make_app) -> None:
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app.set_paused(True)
+    app._on_signal(Signal.START)
+    assert recorder.start_calls == 0
+
+
+def test_pause_discards_tentative_recording(make_app) -> None:
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.START)
+    app.set_paused(True)
+    assert recorder.abort_calls == 1
+    assert not recorder.is_recording
+
+
+def test_early_start_failure_is_reported_on_confirm(make_app) -> None:
+    """Ein Fehlstart darf nicht sofort Alarm schlagen — erst die Bestätigung tut es."""
+    recorder = FakeRecorder(start_error=AudioError("kein Mikrofon"))
+    app = make_app(recorder)
+    app._on_signal(Signal.START)
+    assert app.state.current is State.IDLE
+    assert recorder.start_calls == 1
+    app._on_signal(Signal.CONFIRM)
+    assert recorder.start_calls == 2  # zweiter Versuch mit regulärer Fehlerbehandlung
+    assert app.state.current is State.IDLE
+
+
+def test_tentative_recording_times_out(make_app) -> None:
+    """Sicherheitsnetz: bleibt die Bestätigung aus, läuft das Mikrofon nicht ewig."""
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.START)
+    recorder.elapsed = 0.5
+    app._check_tentative_timeout()
+    assert recorder.is_recording  # noch im Rahmen
+    recorder.elapsed = 5.0
+    app._check_tentative_timeout()
+    assert recorder.abort_calls == 1
+    assert not recorder.is_recording
+
+
+def test_start_signal_twice_does_not_open_twice(make_app) -> None:
+    recorder = FakeRecorder()
+    app = make_app(recorder)
+    app._on_signal(Signal.START)
+    app._on_signal(Signal.START)
+    assert recorder.start_calls == 1

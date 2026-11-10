@@ -17,6 +17,10 @@ tap_key = "cmd"
 double_tap_window = 0.50   # max. Abstand zwischen den beiden Taps (s)
 max_tap_duration = 0.45    # länger gehalten = kein Tap, sondern ein Modifier-Griff
 
+# Mikrofon schon beim zweiten Tastendruck öffnen (nicht erst beim Loslassen),
+# damit der Anfang des Diktats nicht abgeschnitten wird. false = klassisch.
+early_start = true
+
 # Nur relevant für mode = "combo".
 combo = "<ctrl>+<shift>+d"
 

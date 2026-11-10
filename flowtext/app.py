@@ -21,7 +21,8 @@ from pathlib import Path
 from .audio.recorder import AudioError, AudioRecorder
 from .config import Config, temp_dir
 from .feedback import Feedback
-from .hotkey.service import TRIGGER, HotkeyService
+from .hotkey.detectors import Signal
+from .hotkey.service import HotkeyService
 from .pipeline.base import Pipeline
 from .pipeline.factory import build_pipeline
 from .state import State, StateMachine
@@ -30,6 +31,11 @@ log = logging.getLogger(__name__)
 
 #: Ältere temporäre Aufnahmen werden beim Start entfernt.
 _STALE_TEMP_AGE_SECONDS = 24 * 3600
+
+#: Sicherheitsnetz für den frühen Start: bleibt eine vorläufig gestartete
+#: Aufnahme länger ohne Bestätigung/Abbruch offen (z. B. weil ein Ereignis
+#: verloren ging), wird sie verworfen. Deutlich über ``max_tap_duration``.
+_TENTATIVE_TIMEOUT_SECONDS = 2.0
 
 
 class FlowTextApp:
@@ -56,6 +62,10 @@ class FlowTextApp:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._paused = False
+        #: ``True``, wenn das Mikrofon schon läuft, der Doppel-Tap aber noch
+        #: nicht bestätigt ist (siehe ``Signal.START``). Gehört dem Controller-Thread;
+        #: nur ``set_paused`` greift von außen ein.
+        self._tentative = False
 
     # ------------------------------------------------------------------ API
 
@@ -134,6 +144,8 @@ class FlowTextApp:
         if value == self._paused:
             return
         self._paused = value
+        if value and self._tentative:
+            self._discard_tentative("Pause")
         if value and self.state.current is State.RECORDING:
             self.recorder.abort()
             self.state.transition(State.IDLE)
@@ -163,13 +175,58 @@ class FlowTextApp:
                 event = self.events.get(timeout=0.2)
             except queue.Empty:
                 self._check_max_duration()
+                self._check_tentative_timeout()
                 continue
-            if event == TRIGGER:
-                try:
-                    self._on_trigger()
-                except Exception:
-                    log.exception("Unexpected error in controller.")
-                    self._to_error()
+            try:
+                self._on_signal(event)
+            except Exception:
+                log.exception("Unexpected error in controller.")
+                self._to_error()
+
+    def _on_signal(self, event: str) -> None:
+        """Verteilt ein Hotkey-Signal. Unbekannte Werte werden ignoriert."""
+        if event == Signal.START:
+            self._on_early_start()
+        elif event == Signal.CANCEL:
+            self._discard_tentative("kein Doppel-Tap")
+        elif event == Signal.CONFIRM:
+            self._on_trigger()
+
+    # ------------------------------------------------------ früher Start
+
+    def _on_early_start(self) -> None:
+        """Öffnet das Mikrofon schon beim zweiten Tastendruck.
+
+        Der Zustand bleibt ``IDLE`` (und es gibt keinen Ton): erst die
+        Bestätigung beim Loslassen macht daraus eine echte Aufnahme. So
+        geht der Anfang des Diktats nicht verloren, ein Fehlstart bleibt
+        aber unsichtbar. Läuft schon etwas oder ist FlowText pausiert, wird
+        das Signal ignoriert — im Zustand ``RECORDING`` ist es der zweite Tap
+        des Stopp-Doppel-Taps.
+        """
+        if self._paused or self._tentative or self.state.current is not State.IDLE:
+            return
+        try:
+            self.recorder.start()
+        except AudioError as exc:
+            # Kein Fehlalarm: vielleicht war es gar kein Doppel-Tap. Scheitert es
+            # wirklich, wiederholt die Bestätigung den Start samt Fehlerbehandlung.
+            log.debug("Früher Start fehlgeschlagen (%s) — Bestätigung versucht es erneut.", exc)
+            return
+        self._tentative = True
+        log.debug("Mikrofon vorläufig geöffnet (früher Start).")
+
+    def _discard_tentative(self, reason: str) -> None:
+        """Verwirft eine vorläufig gestartete Aufnahme. Ohne Start: wirkungslos."""
+        if not self._tentative:
+            return
+        self._tentative = False
+        self.recorder.abort()
+        log.debug("Vorläufige Aufnahme verworfen (%s).", reason)
+
+    def _check_tentative_timeout(self) -> None:
+        if self._tentative and self.recorder.elapsed >= _TENTATIVE_TIMEOUT_SECONDS:
+            self._discard_tentative("Zeitüberschreitung ohne Bestätigung")
 
     def _on_trigger(self) -> None:
         if self._paused:
@@ -184,6 +241,15 @@ class FlowTextApp:
             log.info("Trigger ignored — state is %s.", current)
 
     def _begin_recording(self) -> None:
+        already_running = self._tentative and self.recorder.is_recording
+        self._tentative = False
+        # Läuft das Mikrofon schon (früher Start), wird nur noch bestätigt.
+        if not already_running and not self._start_recorder():
+            return
+        self.state.transition(State.RECORDING)
+        log.info("🎤 Recording active — trigger again to stop.")
+
+    def _start_recorder(self) -> bool:
         try:
             self.recorder.start()
         except AudioError as exc:
@@ -193,9 +259,8 @@ class FlowTextApp:
                 "for the starting app (Terminal, iTerm2, VS Code …)."
             )
             self._to_error()
-            return
-        self.state.transition(State.RECORDING)
-        log.info("🎤 Recording active — trigger again to stop.")
+            return False
+        return True
 
     def _finish_recording(self, *, reason: str = "Hotkey") -> None:
         recording = self.recorder.stop()

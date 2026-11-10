@@ -11,6 +11,7 @@ import pytest
 
 from flowtext.config import HotkeyConfig
 from flowtext.hotkey import service as service_module
+from flowtext.hotkey.detectors import Signal
 from flowtext.hotkey.service import TRIGGER, HotkeyService
 
 
@@ -60,7 +61,7 @@ def service(monkeypatch: pytest.MonkeyPatch):
     FakeListener.instances.clear()
     monkeypatch.setattr("flowtext.hotkey.keynames.sys.platform", "darwin")
 
-    cfg = HotkeyConfig(mode="double_tap", tap_key="cmd_r")
+    cfg = HotkeyConfig(mode="double_tap", tap_key="cmd_r", early_start=False)
     events: queue.Queue[str] = queue.Queue()
     svc = HotkeyService(cfg, events)
     monkeypatch.setattr(svc, "_make_listener", lambda: FakeListener(svc._on_press, svc._on_release))
@@ -91,6 +92,50 @@ def test_double_tap_cmd_r_produces_trigger(service) -> None:
     assert events.get(timeout=1.0) == TRIGGER
     assert events.empty()
     assert svc.trigger_count == 1
+
+
+def test_early_start_emits_start_then_confirm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Früher Start: der zweite Druck meldet START, das Loslassen CONFIRM."""
+    FakeListener.instances.clear()
+    monkeypatch.setattr("flowtext.hotkey.keynames.sys.platform", "darwin")
+    events: queue.Queue[str] = queue.Queue()
+    svc = HotkeyService(HotkeyConfig(mode="double_tap", tap_key="cmd_r", early_start=True), events)
+    monkeypatch.setattr(svc, "_make_listener", lambda: FakeListener(svc._on_press, svc._on_release))
+    try:
+        svc.start()
+        listener = _wait_for_listener()
+        listener.on_press(CMD_R)
+        listener.on_release(CMD_R)
+        listener.on_press(CMD_R)
+        assert events.get(timeout=1.0) == Signal.START
+        assert events.empty()
+        listener.on_release(CMD_R)
+        assert events.get(timeout=1.0) == Signal.CONFIRM
+        assert svc.trigger_count == 1  # nur CONFIRM zählt als Auslösung
+    finally:
+        svc.stop(timeout=1.0)
+
+
+def test_early_start_cancel_when_key_is_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeListener.instances.clear()
+    monkeypatch.setattr("flowtext.hotkey.keynames.sys.platform", "darwin")
+    events: queue.Queue[str] = queue.Queue()
+    cfg = HotkeyConfig(mode="double_tap", tap_key="cmd_r", early_start=True, max_tap_duration=0.05)
+    svc = HotkeyService(cfg, events)
+    monkeypatch.setattr(svc, "_make_listener", lambda: FakeListener(svc._on_press, svc._on_release))
+    try:
+        svc.start()
+        listener = _wait_for_listener()
+        listener.on_press(CMD_R)
+        listener.on_release(CMD_R)
+        listener.on_press(CMD_R)
+        assert events.get(timeout=1.0) == Signal.START
+        time.sleep(0.1)  # länger gehalten als max_tap_duration
+        listener.on_release(CMD_R)
+        assert events.get(timeout=1.0) == Signal.CANCEL
+        assert svc.trigger_count == 0
+    finally:
+        svc.stop(timeout=1.0)
 
 
 def test_single_tap_produces_nothing(service) -> None:

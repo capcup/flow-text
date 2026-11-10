@@ -59,6 +59,11 @@ class HotkeyConfig:
     #: ("nächste Eingabequelle") und keine gute Wahl.
     combo: str = "<ctrl>+<shift>+d"
 
+    #: Nur für ``mode = "double_tap"``: das Mikrofon schon beim zweiten
+    #: Tastendruck öffnen statt erst beim Loslassen, damit der Anfang des
+    #: Diktats nicht abgeschnitten wird. ``False`` = klassisches Verhalten.
+    early_start: bool = True
+
     #: Backoff-Obergrenze für Listener-Neustarts durch den Supervisor.
     max_restarts: int = 5
 

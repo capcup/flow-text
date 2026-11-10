@@ -166,3 +166,15 @@ class TestPipelineValidation:
         setattr(cfg.pipeline, field, "quatsch")
         with pytest.raises(ConfigError, match="unbekannt"):
             validate(cfg)
+
+
+def test_early_start_is_on_by_default_and_configurable(tmp_path: Path) -> None:
+    assert Config().hotkey.early_start is True
+    cfg = load(_write(tmp_path, "[hotkey]\nearly_start = false\n"))
+    assert cfg.hotkey.early_start is False
+
+
+def test_shipped_config_enables_early_start() -> None:
+    """Die mitgelieferte config.toml muss den Schlüssel kennen (sonst ConfigError)."""
+    cfg = load(Path(__file__).resolve().parent.parent / "config.toml")
+    assert cfg.hotkey.early_start is True

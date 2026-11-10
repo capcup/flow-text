@@ -115,5 +115,6 @@ items; `FIXES.md` keeps the record of what was fixed and why.
 
 ## 6. Roadmap
 
-_Intentionally empty — being redefined from scratch. See project
-conversation dated 2026-08-10._
+Open work lives in [`IMPROVEMENTS.md`](IMPROVEMENTS.md): a prioritised
+backlog from the 2026-10-27 review with on-device latency/quality
+measurements and a recommended order. Start there.

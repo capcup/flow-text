@@ -3,6 +3,9 @@
 **Status 2026-08-10: no open items.** Everything documented here has been
 fixed and verified, both locally and in CI.
 
+> Open work found since then is tracked in [`IMPROVEMENTS.md`](IMPROVEMENTS.md).
+> When an item there is done, record it here.
+
 Local state (Python 3.12 / arm64):
 
 - `ruff check` — clean

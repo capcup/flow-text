@@ -56,6 +56,7 @@ Aktualisierst du den Code, ist das Bundle sofort aktuell.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import plistlib
@@ -138,6 +139,112 @@ int main(int argc, char *argv[]) {
 """
 
 
+#: Stub **ohne** ``exec``: lädt libpython und führt Python im eigenen
+#: Prozess aus. Platzhalter ``@…@`` werden beim Bauen eingesetzt.
+#:
+#: Ohne Argumente startet er ``-m flowtext --menubar`` und leitet
+#: stdout/stderr ins ``launcher.log``. Mit ``--python …`` reicht er die
+#: restlichen Argumente unverändert an Python weiter (Selbsttest beim
+#: Bauen) und lässt die Ausgabe auf dem Terminal.
+_EMBEDDED_STUB_SOURCE = r"""
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <libgen.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <mach-o/dyld.h>
+
+typedef int (*py_bytes_main_t)(int, char **);
+
+static void prepend_env(const char *name, const char *value) {
+    const char *old = getenv(name);
+    if (old != NULL && old[0] != '\0') {
+        char joined[PATH_MAX * 2];
+        snprintf(joined, sizeof(joined), "%s:%s", value, old);
+        setenv(name, joined, 1);
+    } else {
+        setenv(name, value, 1);
+    }
+}
+
+int main(int argc, char *argv[]) {
+    char path[PATH_MAX];
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) != 0) {
+        return 1;
+    }
+    char self[PATH_MAX];
+    if (realpath(path, self) == NULL) {
+        return 1;
+    }
+    char self_copy[PATH_MAX];
+    snprintf(self_copy, sizeof(self_copy), "%s", self);
+    char *dir = dirname(self_copy);
+
+    char bundle_path[PATH_MAX];
+    snprintf(bundle_path, sizeof(bundle_path), "%s/../..", dir);
+
+    int diagnostic = (argc > 1 && strcmp(argv[1], "--python") == 0);
+
+    if (chdir("@PROJECT@") != 0) {
+        perror("chdir @PROJECT@");
+        return 1;
+    }
+
+    setenv("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", 1);
+    setenv("FLOWTEXT_APP_BUNDLE", bundle_path, 1);
+    setenv("PYTHONUNBUFFERED", "1", 1);
+    if (@HAS_SITE_PACKAGES@) {
+        prepend_env("PYTHONPATH", "@SITE_PACKAGES@");
+    }
+
+    if (!diagnostic) {
+        mkdir("@LOG_DIR@", 0755);
+        int fd = open("@LOG_DIR@/launcher.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (fd >= 0) {
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+            if (fd > STDERR_FILENO) {
+                close(fd);
+            }
+        }
+    }
+
+    void *lib = dlopen("@LIBPYTHON@", RTLD_NOW | RTLD_GLOBAL);
+    if (lib == NULL) {
+        fprintf(stderr, "FlowText: libpython nicht ladbar: %s\n", dlerror());
+        return 1;
+    }
+    py_bytes_main_t py_main = (py_bytes_main_t)dlsym(lib, "Py_BytesMain");
+    if (py_main == NULL) {
+        fprintf(stderr, "FlowText: Py_BytesMain fehlt: %s\n", dlerror());
+        return 1;
+    }
+
+    /* argv[0] = absoluter Pfad dieser Binary: daran findet Python die
+       pyvenv.cfg und damit seine Standardbibliothek. */
+    char *py_argv[64];
+    int n = 0;
+    py_argv[n++] = self;
+    if (diagnostic) {
+        for (int i = 2; i < argc && n < 63; i++) {
+            py_argv[n++] = argv[i];
+        }
+    } else {
+        py_argv[n++] = "-m";
+        py_argv[n++] = "flowtext";
+        py_argv[n++] = "--menubar";
+    }
+    py_argv[n] = NULL;
+    return py_main(n, py_argv);
+}
+"""
+
+
 @dataclass(frozen=True)
 class BundleSpec:
     """Alles, was das Bundle über seine Umgebung wissen muss."""
@@ -160,6 +267,8 @@ class BuildResult:
     #: macOS die Architektur nicht bestimmen und verlangt womöglich Rosetta.
     native_launcher: bool
     note: str
+    #: ``True`` = Python läuft eingebettet im Stub, ohne ``exec`` (macOS 26).
+    embedded: bool = False
 
 
 # --------------------------------------------------------------------- Inhalte
@@ -244,15 +353,84 @@ def pyvenv_config(spec: BundleSpec) -> str:
 
 
 def stub_source() -> str:
-    """C-Quelltext des nativen Einstiegspunkts."""
+    """C-Quelltext des Rückfall-Stubs (``exec`` auf ``launch.sh``)."""
     return _STUB_SOURCE.replace("LAUNCH_SCRIPT_NAME", LAUNCH_SCRIPT)
+
+
+def _c_escape(text: str) -> str:
+    """Macht einen Pfad zum Inhalt eines C-Stringliterals."""
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "")
+
+
+def embedded_stub_source(spec: BundleSpec, libpython: Path) -> str:
+    """C-Quelltext des Stubs, der Python einbettet (kein ``exec``)."""
+    site = str(spec.site_packages) if spec.site_packages else ""
+    replacements = {
+        "@PROJECT@": str(spec.project),
+        "@LOG_DIR@": str(spec.log_dir),
+        "@LIBPYTHON@": str(libpython),
+        "@SITE_PACKAGES@": site,
+        "@HAS_SITE_PACKAGES@": "1" if site else "0",
+    }
+    source = _EMBEDDED_STUB_SOURCE
+    for key, value in replacements.items():
+        source = source.replace(key, value if key == "@HAS_SITE_PACKAGES@" else _c_escape(value))
+    return source
+
+
+def find_libpython(python: Path) -> Path | None:
+    """Gemeinsam genutzte ``libpython`` des Interpreters — oder ``None``.
+
+    ``None`` heißt: statischer Build (z. B. pyenv ohne ``--enable-shared``).
+    Dann lässt sich Python nicht einbetten und der Rückfall greift.
+    """
+    code = (
+        "import json, sysconfig as s;"
+        "g = s.get_config_var;"
+        "print(json.dumps({k: g(k) for k in "
+        "('Py_ENABLE_SHARED','LIBDIR','LDLIBRARY','INSTSONAME',"
+        "'PYTHONFRAMEWORKPREFIX','PYTHONFRAMEWORKINSTALLDIR')}))"
+    )
+    try:
+        result = subprocess.run(
+            [str(python), "-c", code], capture_output=True, text=True, timeout=60
+        )
+        info = json.loads(result.stdout.strip().splitlines()[-1])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+    if result.returncode != 0 or not isinstance(info, dict):
+        return None
+    return _pick_libpython(info)
+
+
+def _pick_libpython(info: dict[str, Any]) -> Path | None:
+    """Wählt aus den ``sysconfig``-Werten die Bibliothek, die wirklich existiert."""
+    if not info.get("Py_ENABLE_SHARED"):
+        return None
+    candidates: list[Path] = []
+    libdir = info.get("LIBDIR")
+    framework = info.get("PYTHONFRAMEWORKPREFIX")
+    for name in (info.get("INSTSONAME"), info.get("LDLIBRARY")):
+        if not name:
+            continue
+        if libdir:
+            candidates.append(Path(libdir) / name)
+        if framework:
+            candidates.append(Path(framework) / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
 
 
 # ---------------------------------------------------------------------- Bauen
 
 
-def compile_stub(destination: Path) -> tuple[bool, str]:
-    """Kompiliert den nativen Einstiegspunkt nach ``destination``."""
+def compile_stub(destination: Path, source: str | None = None) -> tuple[bool, str]:
+    """Kompiliert den nativen Einstiegspunkt nach ``destination``.
+
+    Ohne ``source`` entsteht der Rückfall-Stub mit ``exec``.
+    """
     if sys.platform != "darwin":
         return False, "nativer Stub braucht macOS"
 
@@ -261,7 +439,7 @@ def compile_stub(destination: Path) -> tuple[bool, str]:
         try:
             result = subprocess.run(
                 [*compiler, "-arch", arch, "-O2", "-o", str(destination), "-x", "c", "-"],
-                input=stub_source(),
+                input=source if source is not None else stub_source(),
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -273,6 +451,47 @@ def compile_stub(destination: Path) -> tuple[bool, str]:
         last_error = (result.stderr or result.stdout).strip().splitlines()
         return False, last_error[-1] if last_error else "clang meldete einen Fehler"
     return False, "clang nicht gefunden — Command Line Tools installiert? (xcode-select --install)"
+
+
+def verify_embedded(entry: Path) -> tuple[bool, str]:
+    """Selbsttest des eingebetteten Stubs: startet er Python und findet alles?"""
+    modules = ["flowtext", "pynput", "sounddevice", "soundfile", "numpy", "rumps"]
+    code = "import sys, " + ", ".join(modules) + "; print(sys.prefix)"
+    try:
+        result = subprocess.run(
+            [str(entry), "--python", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"nicht ausführbar: {exc}"
+    if result.returncode == 0:
+        return True, "Python startet eingebettet im Stub"
+    detail = (result.stderr or result.stdout).strip().splitlines()
+    return False, detail[-1] if detail else f"Exit-Code {result.returncode}"
+
+
+def _build_entry(spec: BundleSpec, entry: Path) -> tuple[bool, str, bool]:
+    """Erzeugt den Einstieg. Gibt ``(nativ, Hinweis, eingebettet)`` zurück.
+
+    Bevorzugt den eingebetteten Stub ohne ``exec``; bei jedem Problem
+    (kein Shared-Build, Compilerfehler, Selbsttest) bleibt der alte Weg.
+    """
+    reason = ""
+    libpython = find_libpython(spec.python)
+    if libpython is None:
+        reason = "Python ist kein Shared-Build (keine libpython) — Rückfall auf exec-Stub"
+    else:
+        ok, message = compile_stub(entry, embedded_stub_source(spec, libpython))
+        if ok:
+            ok, message = verify_embedded(entry)
+            if ok:
+                return True, f"nativer Stub mit eingebettetem Python ({libpython.name})", True
+        reason = f"Einbetten gescheitert ({message}) — Rückfall auf exec-Stub"
+
+    native, note = compile_stub(entry)
+    return native, f"{note}. {reason}" if native else note, False
 
 
 def build(spec: BundleSpec, dest_dir: Path) -> BuildResult:
@@ -302,14 +521,14 @@ def build(spec: BundleSpec, dest_dir: Path) -> BuildResult:
     script.chmod(0o755)
 
     entry = macos / spec.app_name
-    native, note = compile_stub(entry)
+    native, note, embedded = _build_entry(spec, entry)
     if not native:
         # Rückfall: Skript direkt als Haupteinstieg. Startet aus dem Terminal,
         # aber Launch Services kann die Architektur nicht bestimmen.
         shutil.copy2(script, entry)
         entry.chmod(0o755)
 
-    return BuildResult(app_path=app_path, native_launcher=native, note=note)
+    return BuildResult(app_path=app_path, native_launcher=native, note=note, embedded=embedded)
 
 
 def codesign(app_path: Path, bundle_id: str = DEFAULT_BUNDLE_ID) -> tuple[bool, str]:
@@ -447,6 +666,14 @@ def site_packages_of(python: Path) -> Path | None:
 def next_steps(result: BuildResult) -> str:
     """Anleitung für die Berechtigungen nach dem Bau."""
     warning = ""
+    if result.native_launcher and not result.embedded:
+        warning = f"""
+ℹ️  Python läuft NICHT eingebettet ({result.note}).
+    Auf macOS 26 kann dann das Menüleisten-Icon fehlen. Abhilfe ist ein
+    Python mit gemeinsam genutzter Bibliothek, z. B. mit pyenv:
+        PYTHON_CONFIGURE_OPTS="--enable-shared" pyenv install 3.12.3
+    danach .venv neu anlegen und make_app.py erneut ausführen.
+"""
     if not result.native_launcher:
         warning = f"""
 ⚠️  Kein nativer Einstiegspunkt ({result.note}).

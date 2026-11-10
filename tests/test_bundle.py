@@ -22,6 +22,8 @@ from flowtext.bundle import (
     BundleSpec,
     build,
     codesign,
+    embedded_stub_source,
+    find_libpython,
     host_architecture,
     info_plist,
     launcher_script,
@@ -219,7 +221,7 @@ class TestBuild:
     ) -> None:
         from flowtext import bundle
 
-        monkeypatch.setattr(bundle, "compile_stub", lambda dest: (False, "kein clang"))
+        monkeypatch.setattr(bundle, "compile_stub", lambda dest, source=None: (False, "kein clang"))
         result = build(spec, tmp_path / "dist")
         assert result.native_launcher is False
         entry = result.app_path / "Contents" / "MacOS" / "FlowText"
@@ -271,7 +273,7 @@ def test_next_steps_warns_without_a_native_entry_point(
     """Sonst rätselt man über Fehler -10669."""
     from flowtext import bundle
 
-    monkeypatch.setattr(bundle, "compile_stub", lambda dest: (False, "kein clang"))
+    monkeypatch.setattr(bundle, "compile_stub", lambda dest, source=None: (False, "kein clang"))
     text = next_steps(build(spec, tmp_path / "dist"))
     assert "-10669" in text
     assert "xcode-select --install" in text
@@ -310,6 +312,184 @@ class TestNativeEntryPoint:
         ok, message = bundle.compile_stub(tmp_path / "stub")
         assert ok is False
         assert "macOS" in message
+
+
+# ----------------------------- Regression: macOS 26, kein exec im Haupteinstieg
+
+
+class TestEmbeddedStub:
+    """Unter macOS 26 zeichnet ``NSStatusBar`` kein Icon, wenn der
+    Haupteinstieg per ``exec`` zu einem anderen Programm wird. Deshalb
+    läuft Python eingebettet im Stub."""
+
+    @pytest.fixture
+    def libpython(self, tmp_path: Path) -> Path:
+        lib = tmp_path / "lib" / "libpython3.12.dylib"
+        lib.parent.mkdir()
+        lib.write_bytes(b"")
+        return lib
+
+    @pytest.fixture
+    def source(self, spec: BundleSpec, libpython: Path) -> str:
+        return embedded_stub_source(spec, libpython)
+
+    def test_does_not_exec(self, source: str) -> None:
+        import re
+
+        assert not re.search(r"\bexec[lv]p?e?\s*\(", source)
+        assert "posix_spawn" not in source
+
+    def test_calls_python_in_process(self, source: str) -> None:
+        assert "dlopen" in source
+        assert "Py_BytesMain" in source
+
+    def test_starts_the_menubar_variant(self, source: str) -> None:
+        assert '"flowtext"' in source
+        assert '"--menubar"' in source
+
+    def test_embeds_the_paths(self, spec: BundleSpec, libpython: Path, source: str) -> None:
+        assert str(libpython) in source
+        assert str(spec.project) in source
+        assert str(spec.log_dir) in source
+
+    def test_has_no_placeholder_left(self, source: str) -> None:
+        assert "@" not in source
+
+    def test_offers_a_diagnostic_mode(self, source: str) -> None:
+        """Selbsttest beim Bauen: ``FlowText --python -c …``."""
+        assert '"--python"' in source
+
+    def test_site_packages_only_when_known(
+        self, spec: BundleSpec, libpython: Path, tmp_path: Path
+    ) -> None:
+        assert "if (0)" in embedded_stub_source(spec, libpython)
+        with_sp = BundleSpec(
+            python=spec.python,
+            project=spec.project,
+            log_dir=spec.log_dir,
+            site_packages=tmp_path / "sp",
+        )
+        source = embedded_stub_source(with_sp, libpython)
+        assert "if (1)" in source
+        assert str(tmp_path / "sp") in source
+
+    def test_quotes_in_paths_are_escaped(self, tmp_path: Path, libpython: Path) -> None:
+        spec = BundleSpec(
+            python=tmp_path / "p",
+            project=tmp_path / 'a "b"',
+            log_dir=tmp_path,
+        )
+        assert '\\"b\\"' in embedded_stub_source(spec, libpython)
+
+
+class TestFindLibpython:
+    def test_static_build_has_no_library(self, tmp_path: Path) -> None:
+        from flowtext.bundle import _pick_libpython
+
+        assert _pick_libpython({"Py_ENABLE_SHARED": 0, "LIBDIR": str(tmp_path)}) is None
+
+    def test_shared_build_returns_the_existing_file(self, tmp_path: Path) -> None:
+        from flowtext.bundle import _pick_libpython
+
+        lib = tmp_path / "libpython3.12.dylib"
+        lib.write_bytes(b"")
+        info = {
+            "Py_ENABLE_SHARED": 1,
+            "LIBDIR": str(tmp_path),
+            "INSTSONAME": "libpython3.12.dylib",
+            "LDLIBRARY": "libpython3.12.dylib",
+        }
+        assert _pick_libpython(info) == lib.resolve()
+
+    def test_shared_flag_but_missing_file(self, tmp_path: Path) -> None:
+        from flowtext.bundle import _pick_libpython
+
+        info = {"Py_ENABLE_SHARED": 1, "LIBDIR": str(tmp_path), "LDLIBRARY": "fehlt.dylib"}
+        assert _pick_libpython(info) is None
+
+    def test_unusable_interpreter_returns_none(self, spec: BundleSpec) -> None:
+        """Das Fixture-\"python3\" ist nur ein Shellskript ohne sysconfig."""
+        assert find_libpython(spec.python) is None
+
+
+class TestBuildEntry:
+    def test_without_libpython_falls_back_to_the_exec_stub(
+        self, spec: BundleSpec, tmp_path: Path, monkeypatch
+    ) -> None:
+        from flowtext import bundle
+
+        seen: list[str | None] = []
+
+        def fake_compile(dest: Path, source: str | None = None) -> tuple[bool, str]:
+            seen.append(source)
+            dest.write_bytes(b"\xcf\xfa")
+            return True, "ok"
+
+        monkeypatch.setattr(bundle, "find_libpython", lambda python: None)
+        monkeypatch.setattr(bundle, "compile_stub", fake_compile)
+        result = build(spec, tmp_path / "dist")
+        assert result.native_launcher is True
+        assert result.embedded is False
+        assert seen == [None]
+        assert "Shared-Build" in result.note
+
+    def test_embedded_stub_is_used_when_the_self_test_passes(
+        self, spec: BundleSpec, tmp_path: Path, monkeypatch
+    ) -> None:
+        from flowtext import bundle
+
+        lib = tmp_path / "libpython3.12.dylib"
+        lib.write_bytes(b"")
+        monkeypatch.setattr(bundle, "find_libpython", lambda python: lib)
+        monkeypatch.setattr(bundle, "compile_stub", lambda dest, source=None: (True, "ok"))
+        monkeypatch.setattr(bundle, "verify_embedded", lambda entry: (True, "ok"))
+        result = build(spec, tmp_path / "dist")
+        assert result.embedded is True
+        assert result.native_launcher is True
+
+    def test_failed_self_test_falls_back(
+        self, spec: BundleSpec, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Lieber der alte Weg als ein Bundle, das nicht startet."""
+        from flowtext import bundle
+
+        lib = tmp_path / "libpython3.12.dylib"
+        lib.write_bytes(b"")
+        sources: list[str | None] = []
+
+        def fake_compile(dest: Path, source: str | None = None) -> tuple[bool, str]:
+            sources.append(source)
+            return True, "ok"
+
+        monkeypatch.setattr(bundle, "find_libpython", lambda python: lib)
+        monkeypatch.setattr(bundle, "compile_stub", fake_compile)
+        monkeypatch.setattr(bundle, "verify_embedded", lambda entry: (False, "dlopen kaputt"))
+        result = build(spec, tmp_path / "dist")
+        assert result.embedded is False
+        assert result.native_launcher is True
+        assert sources[0] is not None and sources[-1] is None
+        assert "dlopen kaputt" in result.note
+
+    def test_next_steps_explains_a_non_embedded_build(self, spec: BundleSpec) -> None:
+        from flowtext.bundle import BuildResult
+
+        text = next_steps(
+            BuildResult(app_path=spec.project / "FlowText.app", native_launcher=True, note="x")
+        )
+        assert "--enable-shared" in text
+
+    def test_next_steps_is_quiet_for_an_embedded_build(self, spec: BundleSpec) -> None:
+        from flowtext.bundle import BuildResult
+
+        text = next_steps(
+            BuildResult(
+                app_path=spec.project / "FlowText.app",
+                native_launcher=True,
+                note="x",
+                embedded=True,
+            )
+        )
+        assert "--enable-shared" not in text
 
 
 # ------------------------------------- Regression: venv darf nicht aufgelöst werden

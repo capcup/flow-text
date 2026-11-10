@@ -8,6 +8,7 @@ from flowtext.hotkey.detectors import (
     ComboDetector,
     DoubleTapDetector,
     HotkeyConfigError,
+    Signal,
     build_detector,
     canonical,
     expand,
@@ -41,7 +42,7 @@ class TestParsing:
 
 class TestComboDetector:
     def _press(self, det: ComboDetector, *names: str) -> list[bool]:
-        return [det.on_press(name, 0.0) for name in names]
+        return [det.on_press(name, 0.0) is Signal.CONFIRM for name in names]
 
     def test_fires_on_complete_combo(self) -> None:
         det = ComboDetector("<ctrl>+<shift>+d")
@@ -63,16 +64,16 @@ class TestComboDetector:
     def test_autorepeat_fires_once(self) -> None:
         det = ComboDetector("<ctrl>+<shift>+d")
         self._press(det, "ctrl_l", "shift_l")
-        assert det.on_press("d", 0.0) is True
-        assert det.on_press("d", 0.1) is False
-        assert det.on_press("d", 0.2) is False
+        assert det.on_press("d", 0.0) is Signal.CONFIRM
+        assert det.on_press("d", 0.1) is Signal.NONE
+        assert det.on_press("d", 0.2) is Signal.NONE
 
     def test_rearms_after_release(self) -> None:
         det = ComboDetector("<ctrl>+<shift>+d")
         self._press(det, "ctrl_l", "shift_l")
-        assert det.on_press("d", 0.0) is True
+        assert det.on_press("d", 0.0) is Signal.CONFIRM
         det.on_release("d", 0.1)
-        assert det.on_press("d", 0.2) is True
+        assert det.on_press("d", 0.2) is Signal.CONFIRM
 
     def test_describe_mentions_combo(self) -> None:
         assert "<ctrl>+<shift>+d" in ComboDetector("<ctrl>+<shift>+d").describe()
@@ -80,8 +81,9 @@ class TestComboDetector:
 
 class TestDoubleTapDetector:
     def _tap(self, det: DoubleTapDetector, t: float, hold: float = 0.05) -> bool:
+        """Ein Tap; ``True``, wenn das Loslassen auslöst (``CONFIRM``)."""
         det.on_press("alt_r", t)
-        return det.on_release("alt_r", t + hold)
+        return det.on_release("alt_r", t + hold) is Signal.CONFIRM
 
     def test_double_tap_fires(self) -> None:
         det = DoubleTapDetector("alt_r", window=0.35, max_tap_duration=0.30)
@@ -107,7 +109,7 @@ class TestDoubleTapDetector:
     def test_held_key_is_not_a_tap(self) -> None:
         det = DoubleTapDetector("alt_r", max_tap_duration=0.30)
         det.on_press("alt_r", 0.0)
-        assert det.on_release("alt_r", 1.0) is False
+        assert det.on_release("alt_r", 1.0) is Signal.NONE
         assert self._tap(det, 1.1) is False
 
     def test_used_as_modifier_resets(self) -> None:
@@ -120,15 +122,15 @@ class TestDoubleTapDetector:
 
     def test_wrong_key_ignored(self) -> None:
         det = DoubleTapDetector("alt_r")
-        assert det.on_press("alt_l", 0.0) is False
-        assert det.on_release("alt_l", 0.05) is False
+        assert det.on_press("alt_l", 0.0) is Signal.NONE
+        assert det.on_release("alt_l", 0.05) is Signal.NONE
 
     def test_left_and_right_option_are_distinct(self) -> None:
         det = DoubleTapDetector("alt_r")
         det.on_press("alt_l", 0.0)
         det.on_release("alt_l", 0.05)
         det.on_press("alt_l", 0.10)
-        assert det.on_release("alt_l", 0.15) is False
+        assert det.on_release("alt_l", 0.15) is Signal.NONE
 
     def test_generic_cmd_matches_both_left_and_right(self) -> None:
         det = DoubleTapDetector("cmd")
@@ -137,11 +139,95 @@ class TestDoubleTapDetector:
         det.on_release("cmd_l", 0.05)
         # Tap cmd_r
         det.on_press("cmd_r", 0.15)
-        assert det.on_release("cmd_r", 0.20) is True
+        assert det.on_release("cmd_r", 0.20) is Signal.CONFIRM
 
     def test_invalid_window_rejected(self) -> None:
         with pytest.raises(HotkeyConfigError):
             DoubleTapDetector("alt_r", window=0.0)
+
+
+class TestDoubleTapEarlyStart:
+    """Früher Start: Mikrofon schon beim *Druck* des zweiten Taps."""
+
+    @staticmethod
+    def _det() -> DoubleTapDetector:
+        return DoubleTapDetector("cmd_r", window=0.5, max_tap_duration=0.45, early_start=True)
+
+    @staticmethod
+    def _first_tap(det: DoubleTapDetector, t: float = 0.0) -> None:
+        assert det.on_press("cmd_r", t) is Signal.NONE
+        assert det.on_release("cmd_r", t + 0.08) is Signal.NONE
+
+    def test_second_press_starts_and_release_confirms(self) -> None:
+        det = self._det()
+        self._first_tap(det)
+        assert det.on_press("cmd_r", 0.25) is Signal.START
+        assert det.on_release("cmd_r", 0.33) is Signal.CONFIRM
+
+    def test_first_press_never_starts(self) -> None:
+        assert self._det().on_press("cmd_r", 0.0) is Signal.NONE
+
+    def test_second_press_too_late_does_not_start(self) -> None:
+        det = self._det()
+        self._first_tap(det)
+        assert det.on_press("cmd_r", 1.5) is Signal.NONE
+        assert det.on_release("cmd_r", 1.55) is Signal.NONE
+
+    def test_held_second_press_cancels(self) -> None:
+        """Cmd lange gehalten (Modifier-Griff) → vorläufiger Start wird verworfen."""
+        det = self._det()
+        self._first_tap(det)
+        assert det.on_press("cmd_r", 0.25) is Signal.START
+        assert det.on_release("cmd_r", 1.00) is Signal.CANCEL
+
+    def test_other_key_after_start_cancels(self) -> None:
+        """Tap, dann Cmd+V: das ist kein Doppel-Tap."""
+        det = self._det()
+        self._first_tap(det)
+        assert det.on_press("cmd_r", 0.25) is Signal.START
+        assert det.on_press("v", 0.28) is Signal.CANCEL
+        assert det.on_release("v", 0.30) is Signal.NONE
+        assert det.on_release("cmd_r", 0.32) is Signal.NONE
+
+    def test_other_key_without_start_is_silent(self) -> None:
+        det = self._det()
+        self._first_tap(det)
+        assert det.on_press("v", 0.10) is Signal.NONE
+
+    def test_single_tap_emits_nothing(self) -> None:
+        det = self._det()
+        self._first_tap(det)
+
+    def test_release_confirms_even_if_release_gap_exceeds_window(self) -> None:
+        """Das Zeitfenster wurde schon beim Druck geprüft."""
+        det = self._det()
+        self._first_tap(det)  # Ende bei 0.08
+        assert det.on_press("cmd_r", 0.50) is Signal.START  # Abstand 0.42 s
+        assert det.on_release("cmd_r", 0.62) is Signal.CONFIRM  # Abstand 0.54 s > Fenster
+
+    def test_rearms_after_confirm(self) -> None:
+        det = self._det()
+        self._first_tap(det)
+        det.on_press("cmd_r", 0.25)
+        det.on_release("cmd_r", 0.33)
+        # Der nächste Doppel-Tap beginnt wieder bei Null.
+        assert det.on_press("cmd_r", 1.0) is Signal.NONE
+        det.on_release("cmd_r", 1.05)
+        assert det.on_press("cmd_r", 1.2) is Signal.START
+
+    def test_generic_cmd_second_side_press_does_not_restart(self) -> None:
+        det = DoubleTapDetector("cmd", early_start=True)
+        det.on_press("cmd_l", 0.0)
+        det.on_release("cmd_l", 0.05)
+        assert det.on_press("cmd_r", 0.2) is Signal.START
+        assert det.on_press("cmd_l", 0.21) is Signal.NONE  # läuft bereits
+
+    def test_disabled_by_default(self) -> None:
+        det = DoubleTapDetector("cmd_r")
+        det.on_press("cmd_r", 0.0)
+        det.on_release("cmd_r", 0.05)
+        assert det.on_press("cmd_r", 0.2) is Signal.NONE
+        assert det.on_release("cmd_r", 0.25) is Signal.CONFIRM
 
 
 class TestFactory:
@@ -154,6 +240,19 @@ class TestFactory:
             max_tap_duration=0.3,
         )
         assert isinstance(det, DoubleTapDetector)
+
+    def test_passes_early_start_to_double_tap(self) -> None:
+        det = build_detector(
+            "double_tap",
+            combo="<ctrl>+d",
+            tap_key="alt_r",
+            double_tap_window=0.35,
+            max_tap_duration=0.3,
+            early_start=True,
+        )
+        det.on_press("alt_r", 0.0)
+        det.on_release("alt_r", 0.05)
+        assert det.on_press("alt_r", 0.2) is Signal.START
 
     def test_builds_combo(self) -> None:
         det = build_detector(
