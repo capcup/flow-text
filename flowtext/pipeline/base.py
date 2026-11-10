@@ -60,8 +60,12 @@ class Pipeline:
         transcriber: Transcriber,
         refiner: Refiner | None = None,
         injector: Injector | None = None,
+        *,
+        cleaner: Refiner | None = None,
     ) -> None:
         self.transcriber = transcriber
+        #: Regelbasierte Bereinigung; läuft vor der (langsameren) Verfeinerung.
+        self.cleaner = cleaner
         self.refiner = refiner
         self.injector = injector
 
@@ -74,6 +78,7 @@ class Pipeline:
         """
         for name, stage in (
             ("Transkription", self.transcriber),
+            ("Bereinigung", self.cleaner),
             ("Verfeinerung", self.refiner),
             ("Ausgabe", self.injector),
         ):
@@ -87,7 +92,7 @@ class Pipeline:
 
     def shutdown(self) -> None:
         """Räumt Stufen auf, die Ressourcen halten (z. B. laufende Timer)."""
-        for stage in (self.transcriber, self.refiner, self.injector):
+        for stage in (self.transcriber, self.cleaner, self.refiner, self.injector):
             shutdown = getattr(stage, "shutdown", None)
             if shutdown is None:
                 continue
@@ -108,6 +113,15 @@ class Pipeline:
         if not text:
             log.warning("Empty transcript — nothing to output.")
             return ""
+
+        if self.cleaner is not None:
+            try:
+                text = self.cleaner.refine(text).strip()
+            except Exception:
+                log.exception("Clean-up failed — using raw transcript.")
+            if not text:
+                log.info("Nothing left after clean-up — nothing to output.")
+                return ""
 
         if self.refiner is not None:
             try:

@@ -14,7 +14,7 @@ import importlib.util
 import logging
 import sys
 
-from ..config import PipelineConfig
+from ..config import CleanupConfig, PipelineConfig
 from .base import Injector, Pipeline, Refiner, Transcriber
 from .stub import LogInjector, NullRefiner, StubTranscriber
 
@@ -94,10 +94,24 @@ def _build_injector(cfg: PipelineConfig) -> Injector:
     return ClipboardInjector(paste=cfg.paste, restore_after=cfg.restore_clipboard_after)
 
 
-def build_pipeline(cfg: PipelineConfig) -> Pipeline:
+def _build_cleaner(cfg: PipelineConfig, cleanup: CleanupConfig | None) -> Refiner | None:
+    if cleanup is None or not cleanup.remove_fillers:
+        return None
+
+    from .cleanup_rules import RuleBasedCleaner
+
+    return RuleBasedCleaner(
+        language=cfg.language,
+        remove_fillers=cleanup.remove_fillers,
+        extra_fillers=cleanup.extra_fillers,
+    )
+
+
+def build_pipeline(cfg: PipelineConfig, cleanup: CleanupConfig | None = None) -> Pipeline:
     """Erzeugt die Pipeline; fehlende Extras degradieren sichtbar auf den Stub."""
     return Pipeline(
         transcriber=_build_transcriber(cfg),
         refiner=_build_refiner(cfg),
         injector=_build_injector(cfg),
+        cleaner=_build_cleaner(cfg, cleanup),
     )

@@ -54,7 +54,7 @@ class FlowTextApp:
 
         self.recorder = recorder or AudioRecorder(cfg.audio)
         self.hotkey = hotkey or HotkeyService(cfg.hotkey, self.events)
-        self.pipeline = pipeline or build_pipeline(cfg.pipeline)
+        self.pipeline = pipeline or build_pipeline(cfg.pipeline, cfg.cleanup)
         self.feedback = Feedback(cfg.feedback)
         self.state.subscribe(self.feedback.on_state_change)
         self.state.subscribe(self._log_state)

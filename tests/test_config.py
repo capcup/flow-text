@@ -178,3 +178,29 @@ def test_shipped_config_enables_early_start() -> None:
     """Die mitgelieferte config.toml muss den Schlüssel kennen (sonst ConfigError)."""
     cfg = load(Path(__file__).resolve().parent.parent / "config.toml")
     assert cfg.hotkey.early_start is True
+
+
+class TestCleanup:
+    def test_off_by_default(self) -> None:
+        cfg = Config()
+        assert cfg.cleanup.remove_fillers is False
+        assert cfg.cleanup.extra_fillers == []
+
+    def test_loaded_from_toml(self, tmp_path: Path) -> None:
+        cfg = load(
+            _write(tmp_path, '[cleanup]\nremove_fillers = true\nextra_fillers = ["quasi"]\n')
+        )
+        assert cfg.cleanup.remove_fillers is True
+        assert cfg.cleanup.extra_fillers == ["quasi"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            'remove_fillers = "false"',  # wäre ohne Prüfung wahr
+            'extra_fillers = "quasi"',
+            "extra_fillers = [1, 2]",
+        ],
+    )
+    def test_wrong_types_are_rejected(self, tmp_path: Path, body: str) -> None:
+        with pytest.raises(ConfigError, match="cleanup"):
+            load(_write(tmp_path, f"[cleanup]\n{body}\n"))

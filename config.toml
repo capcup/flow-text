@@ -58,6 +58,15 @@ injector = "clipboard"
 paste = true                    # false = nur kopieren, von Hand einfügen
 restore_clipboard_after = 1.0   # 0 = Transkript in der Zwischenablage lassen
 
+[cleanup]
+# Füllwörter entfernen: Zögerlaute ("äh", "ähm", "hm") und doppelte
+# Funktionswörter ("ich ich glaube"). Regelbasiert, braucht kein Ollama.
+remove_fillers = false
+
+# Wörter, die zusätzlich IMMER entfernt werden. Vorsicht bei mehrdeutigen
+# Wörtern: "halt" würde auch aus "Halt an!" verschwinden.
+# extra_fillers = ["sozusagen", "quasi"]
+
 [feedback]
 sound = true
 

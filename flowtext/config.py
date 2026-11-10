@@ -125,6 +125,19 @@ class PipelineConfig:
 
 
 @dataclass
+class CleanupConfig:
+    """Anwählbare Textbereinigung nach der Transkription."""
+
+    #: Zögerlaute ("äh", "ähm") und doppelte Funktionswörter entfernen.
+    #: Regelbasiert, braucht kein Ollama.
+    remove_fillers: bool = False
+
+    #: Zusätzliche Wörter, die IMMER entfernt werden, z. B. ``["sozusagen"]``.
+    #: Vorsicht bei mehrdeutigen Wörtern wie "halt" oder "also".
+    extra_fillers: list[str] = field(default_factory=list)
+
+
+@dataclass
 class FeedbackConfig:
     sound: bool = True
     start_sound: str = "/System/Library/Sounds/Tink.aiff"
@@ -146,6 +159,7 @@ class Config:
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -250,6 +264,13 @@ def validate(cfg: Config) -> None:
                 f"pipeline.{field_name} = {value!r} ist unbekannt. "
                 f"Möglich: {', '.join(sorted(implemented))}."
             )
+
+    # Ohne Typprüfung wäre remove_fillers = "false" wahr.
+    if not isinstance(cfg.cleanup.remove_fillers, bool):
+        raise ConfigError("cleanup.remove_fillers muss true oder false sein")
+    extras = cfg.cleanup.extra_fillers
+    if not isinstance(extras, list) or not all(isinstance(w, str) for w in extras):
+        raise ConfigError("cleanup.extra_fillers muss eine Liste von Wörtern sein")
 
 
 def conflicts(cfg: Config) -> list[str]:

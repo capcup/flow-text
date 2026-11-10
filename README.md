@@ -210,6 +210,10 @@ whisper_model = "mlx-community/whisper-large-v3-turbo"
 language = "de"           # Language code ("de", "en", "fr", "es", etc.)
 refiner = "none"          # Standalone default ("none"). Set to "ollama" if desired.
 injector = "clipboard"    # Copies text and performs Cmd+V
+
+[cleanup]
+remove_fillers = false    # true = strip "äh", "ähm", "hm" and stutters ("ich ich"). Rule-based, no Ollama needed.
+# extra_fillers = ["sozusagen", "quasi"]   # Words that are always removed as well
 ```
 
 ### Recommended Whisper Models

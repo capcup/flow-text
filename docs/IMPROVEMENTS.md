@@ -1,7 +1,7 @@
 # FlowText — Improvement Backlog
 
 > **Source:** full code review and on-device measurements, 2026-10-27.
-> **Status:** nothing below is implemented yet. This is the single source of
+> **Status:** see the overview table; most items are still open. This is the single source of
 > truth for open work. `FIXES.md` stays the record of what *was* fixed.
 >
 > **How to work with this file**
@@ -54,13 +54,13 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | B1 | high | Bug | open | Clipboard restore wipes images/files; overwrites user copies |
 | B2 | high | Bug | open | Config values not type-checked (`"false"` is truthy) |
 | R1 | high | Robustness & privacy | open | Transcript text written to the log file at INFO |
-| D1 | high | Docs/tooling/git | open | Commit the pending uncommitted work on `main` |
+| D1 | high | Docs/tooling/git | done (2026-11-10, 2905d8e) | Commit the pending uncommitted work on `main` |
 | P3 | med  | Performance | open | Shortened encoder window (encoder = 89 % of latency) with guards |
 | P4 | med  | Performance | open | Transcribe long dictations incrementally while recording |
 | P5 | med  | Performance | open | Trim leading/trailing silence before transcription (helps Q1 too) |
 | P6 | med  | Performance | open | Ollama: `keep_alive`, reuse client |
 | P7 | med  | Performance | open | Benchmark Parakeet TDT v3 (`parakeet-mlx`) as an alternative transcriber |
-| Q4 | med  | Quality | open | Selectable text clean-up options (filler words first), rules + LLM |
+| Q4 | med  | Quality | partial (2026-11-10) | Selectable text clean-up options (filler words first), rules + LLM. Rule stage done; LLM stage, guard and menu toggle open |
 | Q5 | med  | Quality | open | Refiner: re-evaluate model (`qwen2.5:7b`), harden prompt and output guards |
 | B3 | med  | Bug | open | `config.local.toml` replaces instead of overriding `config.toml` |
 | B4 | med  | Bug | open | `set_paused` races with the controller thread |
@@ -300,6 +300,14 @@ word-level Levenshtein distance divided by the number of reference words.
   7. Menu bar: checkable items per option (ties into U4). The stages read the
      options per dictation, so a toggle needs no restart. Persisting a toggle
      needs a writable user config (R4/B3).
+- *Implemented 2026-11-10 (steps 1 and 3, part of 2):* `[cleanup]` with
+  `remove_fillers` and `extra_fillers` (type-checked in `validate`),
+  `pipeline/cleanup_rules.py` `RuleBasedCleaner`, wired as
+  `Pipeline(cleaner=…)` before the refiner. A dictation that consists only of
+  fillers produces no paste. Tested on hand-written sentences only, not on
+  real Whisper output; check with P2.
+- *Still open:* steps 4–7 (prompt builder, subsequence guard, Ollama
+  fallback warning, menu bar toggle) and the general stage list from step 2.
 - *Note for Q2:* write the `initial_prompt` as clean prose. A prompt that
   contains fillers makes Whisper transcribe them.
 - *Done when:* `remove_fillers = true` strips fillers with `refiner = "none"`
