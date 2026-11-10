@@ -15,6 +15,7 @@ import logging
 import queue
 import threading
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -38,6 +39,20 @@ _STALE_TEMP_AGE_SECONDS = 24 * 3600
 #: Aufnahme länger ohne Bestätigung/Abbruch offen (z. B. weil ein Ereignis
 #: verloren ging), wird sie verworfen. Deutlich über ``max_tap_duration``.
 _TENTATIVE_TIMEOUT_SECONDS = 2.0
+
+
+@dataclass(frozen=True)
+class Notice:
+    """Kurzlebige Meldung für die Oberfläche (Fehler oder Hinweis).
+
+    Der Zustand ``ERROR`` dauert nur Mikrosekunden — die Menüleiste, die alle
+    200 ms nachsieht, bekäme ihn nie zu Gesicht. Die Meldung bleibt deshalb
+    getrennt vom Zustand stehen, bis sie abläuft oder ein neues Diktat beginnt.
+    """
+
+    message: str
+    is_error: bool = True
+    at: float = field(default_factory=time.monotonic)
 
 
 class FlowTextApp:
@@ -64,6 +79,9 @@ class FlowTextApp:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._paused = False
+        #: Letzte Meldung für die Oberfläche; wird aus Controller- und
+        #: Worker-Thread gesetzt, vom Hauptthread nur gelesen.
+        self.notice: Notice | None = None
         #: ``True``, wenn das Mikrofon schon läuft, der Doppel-Tap aber noch
         #: nicht bestätigt ist (siehe ``Signal.START``). Gehört dem Controller-Thread;
         #: nur ``set_paused`` greift von außen ein.
@@ -183,7 +201,7 @@ class FlowTextApp:
                 self._on_signal(event)
             except Exception:
                 log.exception("Unexpected error in controller.")
-                self._to_error()
+                self._to_error("Internal error — see log")
 
     def _on_signal(self, event: str) -> None:
         """Verteilt ein Hotkey-Signal. Unbekannte Werte werden ignoriert."""
@@ -248,6 +266,7 @@ class FlowTextApp:
         # Läuft das Mikrofon schon (früher Start), wird nur noch bestätigt.
         if not already_running and not self._start_recorder():
             return
+        self.notice = None  # neue Aufnahme: alte Meldung ist erledigt
         self.state.transition(State.RECORDING)
         log.info("🎤 Recording active — trigger again to stop.")
 
@@ -260,7 +279,7 @@ class FlowTextApp:
                 "Check: System Settings → Privacy & Security → Microphone "
                 "for the starting app (Terminal, iTerm2, VS Code …)."
             )
-            self._to_error()
+            self._to_error("Microphone could not be opened")
             return False
         return True
 
@@ -288,7 +307,7 @@ class FlowTextApp:
             self.jobs.put_nowait(recording)
         except queue.Full:
             log.error("Verarbeitungswarteschlange voll — Aufnahme verworfen.")
-            self._to_error()
+            self._to_error("Still busy — recording discarded")
 
     def _check_max_duration(self) -> None:
         if self.state.current is not State.RECORDING:
@@ -309,11 +328,14 @@ class FlowTextApp:
 
     def _process(self, recording: Recording) -> None:
         try:
-            self.pipeline.run(recording)
+            text = self.pipeline.run(recording)
         except Exception:
             log.exception("Verarbeitung fehlgeschlagen.")
-            self._to_error()
+            self._to_error("Transcription failed — see log")
         else:
+            if not text:
+                # Kein Fehler, aber ohne Hinweis wirkt es wie "tut nichts".
+                self.notice = Notice("No speech detected — nothing inserted", is_error=False)
             self.state.transition(State.IDLE)
         finally:
             if not self.cfg.audio.delete_after_use:
@@ -330,7 +352,8 @@ class FlowTextApp:
 
     # --------------------------------------------------------------- Helfer
 
-    def _to_error(self) -> None:
+    def _to_error(self, message: str = "Error — see log") -> None:
+        self.notice = Notice(message)
         self.state.transition(State.ERROR)
         self.state.transition(State.IDLE)
 

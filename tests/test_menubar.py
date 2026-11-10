@@ -8,6 +8,7 @@ gesamte Menülogik hier prüfbar.
 from __future__ import annotations
 
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Any, ClassVar
@@ -464,3 +465,81 @@ def test_sigterm_quits_the_menubar_app(rumps_module, monkeypatch, tmp_path, quit
     assert flow.stop_requested
     timer.tick()
     assert quitted == [True]
+
+
+# ------------------------------------------------------------------ Meldungen
+
+
+class TestNotices:
+    """Regression R2: ERROR → IDLE folgt direkt aufeinander, die Menüleiste
+    sah den Fehler deshalb nie."""
+
+    def test_error_stays_visible_after_the_state_is_idle_again(self, menu, rumps_module) -> None:
+        shown: list[tuple[Any, ...]] = []
+        rumps_module.notification = lambda *a, **kw: shown.append(a)
+        _run_ui(menu)
+        timer = FakeTimer.instances[-1]
+        timer.tick()
+
+        menu.app._to_error("Microphone could not be opened")
+        assert menu.app.state.current is State.IDLE
+        timer.tick()
+        assert menu._ui.title == "⚠️"
+        assert menu._items["status"].title == "Microphone could not be opened"
+        assert shown == [("FlowText", "", "Microphone could not be opened")]
+
+        timer.tick()
+        assert len(shown) == 1  # eine Mitteilung pro Fehler, nicht pro Tick
+
+    def test_notice_expires(self, menu) -> None:
+        from flowtext.app import Notice
+
+        _run_ui(menu)
+        timer = FakeTimer.instances[-1]
+        menu.app.notice = Notice("alt", at=time.monotonic() - menubar.NOTICE_SECONDS - 1)
+        timer.tick()
+        assert menu._ui.title == "🎙"
+        assert menu._items["status"].title == "Ready"
+
+    def test_new_recording_clears_the_notice(self, menu) -> None:
+        _run_ui(menu)
+        timer = FakeTimer.instances[-1]
+        timer.tick()
+        menu.app._to_error("kaputt")
+        menu.app._on_trigger()
+        assert menu.app.notice is None
+        timer.tick()
+        assert menu._ui.title == "🔴"
+
+    def test_hint_keeps_the_idle_icon_and_sends_no_notification(self, menu, rumps_module) -> None:
+        from flowtext.app import Notice
+
+        shown: list[Any] = []
+        rumps_module.notification = lambda *a, **kw: shown.append(a)
+        _run_ui(menu)
+        timer = FakeTimer.instances[-1]
+        menu.app.notice = Notice("No speech detected — nothing inserted", is_error=False)
+        timer.tick()
+        assert menu._ui.title == "🎙"
+        assert menu._items["status"].title == "No speech detected — nothing inserted"
+        assert shown == []
+
+    def test_failing_notification_is_harmless(self, menu, rumps_module) -> None:
+        def boom(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("kein Bundle")
+
+        rumps_module.notification = boom
+        _run_ui(menu)
+        timer = FakeTimer.instances[-1]
+        timer.tick()
+        menu.app._to_error("kaputt")
+        timer.tick()
+        assert menu._ui.title == "⚠️"
+
+    def test_lock_and_pause_win_over_notices(self) -> None:
+        from flowtext.app import Notice
+
+        notice = Notice("kaputt")
+        assert menubar.icon_for(State.IDLE, False, False, notice) == menubar.LOCKED_ICON
+        assert menubar.icon_for(State.IDLE, True, True, notice) == menubar.PAUSED_ICON
+        assert menubar.label_for(State.RECORDING, False, True, notice) == "Recording…"

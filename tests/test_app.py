@@ -189,6 +189,35 @@ def test_failed_processing_returns_to_idle(make_app) -> None:
     app._on_trigger()
     app._process(app.jobs.get_nowait())
     assert app.state.current is State.IDLE  # über ERROR zurück nach IDLE
+    assert app.notice is not None
+    assert app.notice.is_error
+    assert "Transcription failed" in app.notice.message
+
+
+def test_empty_result_leaves_a_hint_not_an_error(make_app) -> None:
+    app = make_app()
+    app.pipeline.run = lambda recording: ""  # type: ignore[method-assign]
+    app._on_trigger()
+    app._on_trigger()
+    app._process(app.jobs.get_nowait())
+    assert app.notice is not None
+    assert not app.notice.is_error
+
+
+def test_successful_dictation_leaves_no_notice(make_app) -> None:
+    app = make_app()
+    app._to_error("alt")
+    app._on_trigger()
+    app._on_trigger()
+    app._process(app.jobs.get_nowait())
+    assert app.notice is None
+
+
+def test_microphone_failure_sets_a_notice(make_app) -> None:
+    app = make_app(FakeRecorder(start_error=AudioError("kein Gerät")))
+    app._on_trigger()
+    assert app.notice is not None
+    assert "Microphone" in app.notice.message
 
 
 def test_failing_debug_dump_does_not_break_processing(make_app) -> None:

@@ -30,7 +30,7 @@ import time
 from typing import Any
 
 from . import permissions
-from .app import FlowTextApp
+from .app import FlowTextApp, Notice
 from .config import Config, candidate_paths, log_dir
 from .state import State
 
@@ -67,6 +67,9 @@ SETTINGS_URLS = {
     ),
 }
 
+#: So lange bleibt eine Meldung (Fehler, "keine Sprache erkannt") sichtbar.
+NOTICE_SECONDS = 6.0
+
 #: Solange Rechte fehlen, wird alle N Ticks nachgesehen. 200 ms × 10 = 2 s.
 PERMISSION_RECHECK_TICKS = 10
 
@@ -90,17 +93,41 @@ def available() -> bool:
         return False
 
 
-def icon_for(state: State, paused: bool, permissions_ok: bool = True) -> str:
+def active_notice(notice: Notice | None, now: float | None = None) -> Notice | None:
+    """Die Meldung, solange sie noch angezeigt werden soll — sonst ``None``."""
+    if notice is None:
+        return None
+    age = (time.monotonic() if now is None else now) - notice.at
+    return notice if age < NOTICE_SECONDS else None
+
+
+def icon_for(
+    state: State,
+    paused: bool,
+    permissions_ok: bool = True,
+    notice: Notice | None = None,
+) -> str:
     if not permissions_ok:
         return LOCKED_ICON
-    return PAUSED_ICON if paused else ICONS.get(state, ICONS[State.IDLE])
+    if paused:
+        return PAUSED_ICON
+    if state is State.IDLE and notice is not None and notice.is_error:
+        return ICONS[State.ERROR]
+    return ICONS.get(state, ICONS[State.IDLE])
 
 
-def label_for(state: State, paused: bool, permissions_ok: bool = True) -> str:
+def label_for(
+    state: State,
+    paused: bool,
+    permissions_ok: bool = True,
+    notice: Notice | None = None,
+) -> str:
     if not permissions_ok:
         return "Permissions missing"
     if paused:
         return "Paused"
+    if state is State.IDLE and notice is not None:
+        return notice.message
     return LABELS.get(state, str(state))
 
 
@@ -124,6 +151,7 @@ class MenubarApp:
         self._permissions_ok = permissions.check().ok
         self._ticks = 0
         self._started = False
+        self._notified: Notice | None = None
         # Läuft im Controller-Thread: NUR schreiben, kein Cocoa-Zugriff.
         app.state.subscribe(self._remember_state)
 
@@ -219,9 +247,22 @@ class MenubarApp:
                 log.info("Permissions granted.")
 
         paused = self.app.paused
-        self._ui.title = icon_for(self._state, paused, self._permissions_ok)
-        self._items["status"].title = label_for(self._state, paused, self._permissions_ok)
+        notice = active_notice(self.app.notice)
+        if notice is not None and notice.is_error and notice is not self._notified:
+            self._notified = notice
+            self._notify(notice.message)
+        self._ui.title = icon_for(self._state, paused, self._permissions_ok, notice)
+        self._items["status"].title = label_for(self._state, paused, self._permissions_ok, notice)
         self._items["pause"].title = "Resume" if paused else "Pause"
+
+    def _notify(self, message: str) -> None:
+        """Systemmitteilung für Fehler — das Icon allein übersieht man leicht."""
+        try:
+            import rumps
+
+            rumps.notification("FlowText", "", message, sound=False)
+        except Exception as exc:  # noqa: BLE001 — ohne App-Bundle oft nicht möglich
+            log.debug("Mitteilung konnte nicht angezeigt werden: %s", exc)
 
     def _toggle_pause(self, _sender: Any) -> None:
         self.app.set_paused(not self.app.paused)
