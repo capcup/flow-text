@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,29 @@ import numpy as np
 from .base import TranscriptionResult
 
 log = logging.getLogger(__name__)
+
+#: Whisper nutzt höchstens ~224 Tokens Vortext und schneidet VORN ab. Als
+#: grobe Faustregel für Deutsch: 3 Zeichen pro Token.
+_PROMPT_CHAR_BUDGET = 600
+
+
+def vocabulary_prompt(vocabulary: Iterable[str]) -> str | None:
+    """Baut aus der Vokabelliste den Vortext (``initial_prompt``) für Whisper.
+
+    Bewusst eine schlichte, saubere Aufzählung: Whisper übernimmt neben der
+    Schreibweise auch den Stil des Vortexts.
+    """
+    terms = list(dict.fromkeys(t.strip() for t in vocabulary if t.strip()))
+    if not terms:
+        return None
+    prompt = ", ".join(terms) + "."
+    if len(prompt) > _PROMPT_CHAR_BUDGET:
+        log.warning(
+            "pipeline.vocabulary ist mit %d Zeichen vermutlich zu lang für Whisper "
+            "(~224 Tokens); die ersten Einträge werden dann ignoriert. Liste kürzen.",
+            len(prompt),
+        )
+    return prompt
 
 
 class TranscriptionError(RuntimeError):
@@ -37,9 +61,11 @@ class MlxTranscriber:
         language: str | None = "de",
         *,
         sample_rate: int = 16_000,
+        vocabulary: Iterable[str] = (),
     ) -> None:
         self._model = model
         self._language = language
+        self._initial_prompt = vocabulary_prompt(vocabulary)
         self._sample_rate = sample_rate
         self._ready = False
 
@@ -86,6 +112,10 @@ class MlxTranscriber:
         kwargs: dict[str, Any] = {"path_or_hf_repo": self._model}
         if self._language:
             kwargs["language"] = self._language
+        if self._initial_prompt:
+            # Wirkt als Hinweis, nicht als Garantie. Bei langen Diktaten
+            # verdrängt der bereits erkannte Text den Vortext nach und nach.
+            kwargs["initial_prompt"] = self._initial_prompt
         result: dict[str, Any] = mlx_whisper.transcribe(str(audio_path), **kwargs)
         return result
 

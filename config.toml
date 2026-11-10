@@ -44,6 +44,12 @@ whisper_model = "mlx-community/whisper-large-v3-turbo"
 # kurzen Diktaten hält Whisper "Danke." sonst gern für Englisch.
 language = "de"
 
+# Eigennamen und Fachbegriffe, die Whisper richtig schreiben soll. Nur
+# eintragen, was sonst falsch erkannt wird, und kurz halten (max. ~50-100
+# Begriffe). Es ist ein Hinweis, keine Garantie; für feste Korrekturen
+# siehe [cleanup.replacements].
+# vocabulary = ["FlowText", "Ollama", "Whisper"]
+
 # "ollama" korrigiert Interpunktion und Groß-/Kleinschreibung, "none" ist aus.
 # Braucht ein laufendes "ollama serve" und ein gezogenes Modell:
 #   ollama pull qwen2.5:7b
@@ -66,6 +72,13 @@ remove_fillers = false
 # Wörter, die zusätzlich IMMER entfernt werden. Vorsicht bei mehrdeutigen
 # Wörtern: "halt" würde auch aus "Halt an!" verschwinden.
 # extra_fillers = ["sozusagen", "quasi"]
+
+# Feste Ersetzungen nach der Transkription: "gehört" = "gewünscht".
+# Trifft ganze Wörter, Groß-/Kleinschreibung der Fundstelle ist egal.
+# Funktioniert unabhängig von remove_fillers.
+# [cleanup.replacements]
+# "flow text" = "FlowText"
+# "olammer" = "Ollama"
 
 [feedback]
 sound = true

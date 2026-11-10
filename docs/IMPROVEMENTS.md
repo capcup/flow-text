@@ -50,7 +50,8 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | P1 | high | Performance | open | Pass `np.ndarray` to mlx-whisper; drop WAV round trip and hidden ffmpeg dependency |
 | P2 | high | Performance | open | `tools/bench.py`: latency + WER on real recordings (also measures quality) |
 | Q1 | high | Quality | open | Silence/noise is transcribed as "Vielen Dank." → gate on RMS, blocklist |
-| Q2 | high | Quality | open | Configurable vocabulary via `initial_prompt` (measured WER 4 % → 1 %) |
+| Q2 | high | Quality | done (2026-11-10) | Configurable vocabulary via `initial_prompt` (measured WER 4 % → 1 %) |
+| Q6 | high | Quality | done (2026-11-10) | Fixed replacements after transcription (`cleanup.replacements`) |
 | B1 | high | Bug | open | Clipboard restore wipes images/files; overwrites user copies |
 | B2 | high | Bug | open | Config values not type-checked (`"false"` is truthy) |
 | R1 | high | Robustness & privacy | open | Transcript text written to the log file at INFO |
@@ -265,6 +266,20 @@ word-level Levenshtein distance divided by the number of reference words.
   into `initial_prompt`. Keep it short: Whisper's prompt budget is ~224 tokens.
 - *Done when:* the option is documented in `config.toml` and the README, and
   passed through to the transcriber (unit test with a mocked `mlx_whisper`).
+
+- *Implemented 2026-11-10:* `pipeline.vocabulary` → `vocabulary_prompt()` →
+  `initial_prompt`. Warns above ~600 characters. Not verified against the
+  real model in this session (mocked `mlx_whisper` only).
+- *Known limit:* mlx-whisper 0.4.3 has no `carry_initial_prompt`. The prompt
+  is the start of the token history, so in dictations beyond ~30 s the
+  recognised text gradually pushes it out of the 224-token window, and a
+  temperature fallback drops it entirely. Q6 covers what the hint misses.
+
+**Q6 — Fixed replacements** · high (added and implemented 2026-11-10)
+- `[cleanup.replacements]` table, `"heard" = "wanted"`. Whole words,
+  case-insensitive, longest key first, applied by `RuleBasedCleaner` after
+  filler removal and independent of `remove_fillers`. The hard complement to
+  Q2, which is only a hint to Whisper.
 
 **Q3 — Decode options** · low
 - `condition_on_previous_text=False` (prevents loops carrying over between

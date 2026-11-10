@@ -6,6 +6,10 @@ Entfernt nur, was **eindeutig** kein Inhalt ist:
 * direkte Wiederholungen von Funktionswörtern ("ich ich glaube"),
 * Wörter, die der Nutzer selbst als Füllwort einträgt (``extra_fillers``).
 
+Unabhängig davon wendet sie feste Ersetzungen an (``replacements``), etwa
+"flow text" → "FlowText" — die harte Ergänzung zur Vokabelliste, die für
+Whisper nur ein Hinweis ist.
+
 Kontextabhängige Füller wie "halt" oder "also" bleiben bewusst stehen:
 "Halt an!" und "das ist halt so" kann eine Wortliste nicht unterscheiden.
 Wer sie trotzdem immer loswerden will, trägt sie in ``extra_fillers`` ein.
@@ -18,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +105,7 @@ class RuleBasedCleaner:
         *,
         remove_fillers: bool = True,
         extra_fillers: Iterable[str] = (),
+        replacements: Mapping[str, str] | None = None,
     ) -> None:
         lang = (language or "").lower()
         self._remove_fillers = remove_fillers
@@ -121,19 +126,44 @@ class RuleBasedCleaner:
             re.IGNORECASE,
         )
 
+        # Ersetzungen: Schlüssel normalisiert (klein, einfache Leerzeichen).
+        self._replacements = {
+            " ".join(heard.lower().split()): wanted
+            for heard, wanted in (replacements or {}).items()
+            if heard.strip()
+        }
+        self._replace: re.Pattern[str] | None = None
+        if self._replacements:
+            # Längere Schlüssel zuerst, damit "flow text" vor "flow" greift.
+            keys = sorted(self._replacements, key=len, reverse=True)
+            self._replace = re.compile(
+                r"(?<!\w)(?:"
+                + "|".join(r"\s+".join(map(re.escape, k.split())) for k in keys)
+                + r")(?!\w)",
+                re.IGNORECASE,
+            )
+
     # ------------------------------------------------------------------ API
 
     def warmup(self) -> None:
         if self._remove_fillers:
             log.info("Textbereinigung aktiv: Füllwörter werden entfernt (regelbasiert).")
+        if self._replacements:
+            log.info("Textbereinigung aktiv: %d feste Ersetzungen.", len(self._replacements))
 
     def refine(self, text: str) -> str:
-        if not self._remove_fillers or not text.strip():
+        if not text.strip():
             return text
 
-        cleaned = self._filler.sub(self._replace_filler, text)
-        cleaned = self._drop_repetitions(cleaned)
-        cleaned = self._tidy(cleaned)
+        cleaned = text
+        if self._remove_fillers:
+            cleaned = self._filler.sub(self._replace_filler, cleaned)
+            cleaned = self._drop_repetitions(cleaned)
+            cleaned = self._tidy(cleaned)
+        if self._replace is not None:
+            cleaned = self._replace.sub(
+                lambda m: self._replacements[" ".join(m.group().lower().split())], cleaned
+            )
         if cleaned != text.strip():
             log.debug("Bereinigt: %d → %d Zeichen.", len(text), len(cleaned))
         return cleaned

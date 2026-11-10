@@ -110,6 +110,35 @@ class TestMlxTranscriber:
         MlxTranscriber(language="de").transcribe(tmp_path / "a.wav")
         assert calls[0]["language"] == "de"
 
+    def test_vocabulary_becomes_initial_prompt(self, monkeypatch, tmp_path: Path) -> None:
+        from flowtext.pipeline.transcribe_mlx import MlxTranscriber
+
+        calls = self._install(monkeypatch, {"text": "x"})
+        MlxTranscriber(vocabulary=["FlowText", " Ollama ", "", "FlowText"]).transcribe(
+            tmp_path / "a.wav"
+        )
+        assert calls[0]["initial_prompt"] == "FlowText, Ollama."
+
+    def test_no_vocabulary_means_no_prompt(self, monkeypatch, tmp_path: Path) -> None:
+        from flowtext.pipeline.transcribe_mlx import MlxTranscriber
+
+        calls = self._install(monkeypatch, {"text": "x"})
+        MlxTranscriber().transcribe(tmp_path / "a.wav")
+        assert "initial_prompt" not in calls[0]
+
+    def test_oversized_vocabulary_warns(self, caplog) -> None:
+        from flowtext.pipeline.transcribe_mlx import vocabulary_prompt
+
+        with caplog.at_level("WARNING"):
+            vocabulary_prompt([f"Begriff{i}" for i in range(100)])
+        assert "zu lang" in caplog.text
+
+    def test_factory_passes_vocabulary(self, monkeypatch, tmp_path: Path) -> None:
+        calls = self._install(monkeypatch, {"text": "x"})
+        pipe = build_pipeline(PipelineConfig(injector="none", vocabulary=["Ollama"]))
+        pipe.transcriber.transcribe(tmp_path / "a.wav")
+        assert calls[0]["initial_prompt"] == "Ollama."
+
     def test_no_language_means_autodetect(self, monkeypatch, tmp_path: Path) -> None:
         from flowtext.pipeline.transcribe_mlx import MlxTranscriber
 

@@ -102,6 +102,11 @@ class PipelineConfig:
     #: Feste Sprache statt Auto-Erkennung — schneller und zuverlässiger.
     language: str = "de"
 
+    #: Eigennamen und Fachbegriffe, die Whisper als Vortext bekommt, damit es
+    #: sie richtig schreibt. Kurz halten (Budget ~224 Tokens). Nur ein Hinweis;
+    #: für feste Korrekturen gibt es ``cleanup.replacements``.
+    vocabulary: list[str] = field(default_factory=list)
+
     #: ``"ollama"`` oder ``"none"``. Braucht ein laufendes ``ollama serve``;
     #: ist es nicht erreichbar, wird das Rohtranskript durchgereicht.
     refiner: str = "none"
@@ -135,6 +140,11 @@ class CleanupConfig:
     #: Zusätzliche Wörter, die IMMER entfernt werden, z. B. ``["sozusagen"]``.
     #: Vorsicht bei mehrdeutigen Wörtern wie "halt" oder "also".
     extra_fillers: list[str] = field(default_factory=list)
+
+    #: Feste Ersetzungen nach der Transkription, z. B.
+    #: ``{"flow text" = "FlowText"}``. Ganze Wörter, Groß-/Kleinschreibung
+    #: der Fundstelle egal. Unabhängig von ``remove_fillers``.
+    replacements: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -271,6 +281,14 @@ def validate(cfg: Config) -> None:
     extras = cfg.cleanup.extra_fillers
     if not isinstance(extras, list) or not all(isinstance(w, str) for w in extras):
         raise ConfigError("cleanup.extra_fillers muss eine Liste von Wörtern sein")
+    vocabulary = cfg.pipeline.vocabulary
+    if not isinstance(vocabulary, list) or not all(isinstance(w, str) for w in vocabulary):
+        raise ConfigError("pipeline.vocabulary muss eine Liste von Begriffen sein")
+    replacements = cfg.cleanup.replacements
+    if not isinstance(replacements, dict) or not all(
+        isinstance(k, str) and k.strip() and isinstance(v, str) for k, v in replacements.items()
+    ):
+        raise ConfigError('cleanup.replacements muss eine Tabelle sein: "gehört" = "gewünscht"')
 
 
 def conflicts(cfg: Config) -> list[str]:

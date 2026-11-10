@@ -135,3 +135,36 @@ def test_factory_builds_cleaner_only_when_enabled() -> None:
     pipe = build_pipeline(cfg, CleanupConfig(remove_fillers=True, extra_fillers=["quasi"]))
     assert isinstance(pipe.cleaner, RuleBasedCleaner)
     assert pipe.cleaner.refine("Das ist, äh, quasi fertig.") == "Das ist fertig."
+
+
+# ----------------------------------------------------------------- Ersetzungen
+
+
+def test_replacements_match_whole_words_case_insensitively() -> None:
+    cleaner = RuleBasedCleaner(
+        "de",
+        remove_fillers=False,
+        replacements={"flow text": "FlowText", "Flow": "Fluss", "c plus plus": "C++"},
+    )
+    # Längster Schlüssel gewinnt, Leerraum und Großschreibung der Fundstelle sind egal.
+    assert cleaner.refine("Flow  Text und flow.") == "FlowText und Fluss."
+    assert cleaner.refine("Overflow bleibt, C plus plus auch.") == "Overflow bleibt, C++ auch."
+    # Ohne remove_fillers bleiben Füllwörter stehen.
+    assert cleaner.refine("Äh, flow text.") == "Äh, FlowText."
+
+
+def test_replacements_run_after_filler_removal() -> None:
+    cleaner = RuleBasedCleaner("de", replacements={"flow text": "FlowText"})
+    assert cleaner.refine("Äh, flow, ähm, text ist gut.") == "FlowText ist gut."
+
+
+def test_replacement_text_is_taken_literally() -> None:
+    cleaner = RuleBasedCleaner("de", remove_fillers=False, replacements={"pfad": r"C:\1\g<0>"})
+    assert cleaner.refine("Der Pfad.") == r"Der C:\1\g<0>."
+
+
+def test_factory_builds_cleaner_for_replacements_alone() -> None:
+    cfg = PipelineConfig(transcriber="stub", injector="none")
+    pipe = build_pipeline(cfg, CleanupConfig(replacements={"olammer": "Ollama"}))
+    assert isinstance(pipe.cleaner, RuleBasedCleaner)
+    assert pipe.cleaner.refine("Äh, Olammer läuft.") == "Äh, Ollama läuft."

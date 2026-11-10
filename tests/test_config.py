@@ -204,3 +204,35 @@ class TestCleanup:
     def test_wrong_types_are_rejected(self, tmp_path: Path, body: str) -> None:
         with pytest.raises(ConfigError, match="cleanup"):
             load(_write(tmp_path, f"[cleanup]\n{body}\n"))
+
+
+class TestVocabularyAndReplacements:
+    def test_empty_by_default(self) -> None:
+        cfg = Config()
+        assert cfg.pipeline.vocabulary == []
+        assert cfg.cleanup.replacements == {}
+
+    def test_loaded_from_toml(self, tmp_path: Path) -> None:
+        cfg = load(
+            _write(
+                tmp_path,
+                '[pipeline]\nvocabulary = ["FlowText", "Ollama"]\n'
+                '[cleanup.replacements]\n"flow text" = "FlowText"\n',
+            )
+        )
+        assert cfg.pipeline.vocabulary == ["FlowText", "Ollama"]
+        assert cfg.cleanup.replacements == {"flow text": "FlowText"}
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            '[pipeline]\nvocabulary = "FlowText"',
+            "[pipeline]\nvocabulary = [1]",
+            '[cleanup]\nreplacements = ["a", "b"]',
+            '[cleanup.replacements]\n"flow text" = 1',
+            '[cleanup.replacements]\n" " = "x"',
+        ],
+    )
+    def test_wrong_types_are_rejected(self, tmp_path: Path, body: str) -> None:
+        with pytest.raises(ConfigError, match=r"vocabulary|replacements"):
+            load(_write(tmp_path, body + "\n"))

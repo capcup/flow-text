@@ -94,3 +94,16 @@ outside contributors, a broken upstream release), the right tool is
 
 **Checked, no fix needed:** `torch` is a hard dependency of `mlx-whisper`,
 not removable bloat. `dist/` is correctly gitignored.
+
+## 2026-11-10 — items closed from `IMPROVEMENTS.md`
+
+- **D1** — pending work committed (`2905d8e`).
+- **Q4 (partial)** — rule-based filler removal, `cleanup.remove_fillers` /
+  `extra_fillers` (`75753bc`). LLM stage and menu toggle still open.
+- **Q2** — `pipeline.vocabulary` is passed to Whisper as `initial_prompt`.
+- **Q6** — `[cleanup.replacements]` applies fixed corrections after
+  transcription.
+
+Local state after these: `ruff`, `mypy --strict` clean, 313 tests passing.
+Q2 and Q6 are covered by unit tests with a mocked `mlx_whisper`; neither has
+been checked against real dictations yet.

@@ -53,7 +53,7 @@ def _build_transcriber(cfg: PipelineConfig) -> Transcriber:
 
     from .transcribe_mlx import MlxTranscriber
 
-    return MlxTranscriber(model=cfg.whisper_model, language=cfg.language)
+    return MlxTranscriber(model=cfg.whisper_model, language=cfg.language, vocabulary=cfg.vocabulary)
 
 
 def _build_refiner(cfg: PipelineConfig) -> Refiner:
@@ -95,7 +95,7 @@ def _build_injector(cfg: PipelineConfig) -> Injector:
 
 
 def _build_cleaner(cfg: PipelineConfig, cleanup: CleanupConfig | None) -> Refiner | None:
-    if cleanup is None or not cleanup.remove_fillers:
+    if cleanup is None or not (cleanup.remove_fillers or cleanup.replacements):
         return None
 
     from .cleanup_rules import RuleBasedCleaner
@@ -104,6 +104,7 @@ def _build_cleaner(cfg: PipelineConfig, cleanup: CleanupConfig | None) -> Refine
         language=cfg.language,
         remove_fillers=cleanup.remove_fillers,
         extra_fillers=cleanup.extra_fillers,
+        replacements=cleanup.replacements,
     )
 
 
