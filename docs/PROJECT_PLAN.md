@@ -24,7 +24,7 @@ into any application via a global keyboard shortcut.
 | :--- | :--- | :--- |
 | Hotkey | `pynput` | Global macOS event tap (double-tap / combo trigger) |
 | Audio I/O | `sounddevice` | Microphone stream & buffering |
-| Audio Storage | `soundfile` | WAV export |
+| Audio Storage | `soundfile` | Optional WAV dump for debugging (audio stays in memory otherwise) |
 | STT | `mlx-whisper` | Apple MLX Whisper inference |
 | LLM refinement (optional) | `ollama` | Local punctuation/grammar cleanup |
 | Injection | `pyperclip` + `pynput` | Clipboard + simulated `Cmd+V` |

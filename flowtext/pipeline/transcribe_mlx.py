@@ -7,6 +7,10 @@ wartet man beim ersten Diktat zehn Sekunden und hält das Tool für kaputt.
 ``mlx-whisper`` bietet kein explizites Laden, deshalb transkribiert
 :meth:`warmup` einmal 100 ms Stille — das füllt den internen Cache.
 
+**Die Samples gehen direkt aus dem Speicher an Whisper.** Ein Dateipfad
+würde ``mlx-whisper`` dazu bringen, das externe ``ffmpeg`` zu starten —
+eine versteckte Abhängigkeit, ohne die jedes Diktat scheitert.
+
 **Die Sprache wird fest vorgegeben.** Auto-Erkennung kostet Zeit und geht
 bei kurzen Diktaten regelmäßig daneben ("Danke." als Englisch).
 """
@@ -14,17 +18,19 @@ bei kurzen Diktaten regelmäßig daneben ("Danke." als Englisch).
 from __future__ import annotations
 
 import logging
-import tempfile
 import time
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from ..audio.recorder import AudioArray, Recording
 from .base import TranscriptionResult
 
 log = logging.getLogger(__name__)
+
+#: Whisper erwartet 16 kHz Mono als float32.
+_WHISPER_RATE = 16_000
 
 #: Whisper nutzt höchstens ~224 Tokens Vortext und schneidet VORN ab. Als
 #: grobe Faustregel für Deutsch: 3 Zeichen pro Token.
@@ -60,14 +66,13 @@ class MlxTranscriber:
         model: str = "mlx-community/whisper-large-v3-turbo",
         language: str | None = "de",
         *,
-        sample_rate: int = 16_000,
         vocabulary: Iterable[str] = (),
     ) -> None:
         self._model = model
         self._language = language
         self._initial_prompt = vocabulary_prompt(vocabulary)
-        self._sample_rate = sample_rate
         self._ready = False
+        self._warned_rate = False
 
     # ------------------------------------------------------------------ API
 
@@ -76,10 +81,7 @@ class MlxTranscriber:
         started = time.perf_counter()
         log.info("Loading Whisper model %s …", self._model)
         try:
-            with tempfile.TemporaryDirectory() as tmp:
-                silence = Path(tmp) / "warmup.wav"
-                self._write_silence(silence)
-                self._transcribe_file(silence)
+            self._transcribe(np.zeros(_WHISPER_RATE // 10, dtype=np.float32))
         except Exception as exc:  # noqa: BLE001 — Warmup darf den Start nie verhindern
             log.warning(
                 "Warmup failed (%s). The model will be loaded on first dictation, "
@@ -90,10 +92,10 @@ class MlxTranscriber:
         self._ready = True
         log.info("Whisper model ready (%.1fs).", time.perf_counter() - started)
 
-    def transcribe(self, audio_path: Path) -> TranscriptionResult:
+    def transcribe(self, recording: Recording) -> TranscriptionResult:
         started = time.perf_counter()
         try:
-            result = self._transcribe_file(audio_path)
+            result = self._transcribe(self._prepare(recording))
         except Exception as exc:
             raise TranscriptionError(f"Transkription fehlgeschlagen: {exc}") from exc
 
@@ -106,7 +108,7 @@ class MlxTranscriber:
 
     # -------------------------------------------------------------- intern
 
-    def _transcribe_file(self, audio_path: Path) -> dict[str, Any]:
+    def _transcribe(self, samples: AudioArray) -> dict[str, Any]:
         import mlx_whisper
 
         kwargs: dict[str, Any] = {"path_or_hf_repo": self._model}
@@ -116,11 +118,27 @@ class MlxTranscriber:
             # Wirkt als Hinweis, nicht als Garantie. Bei langen Diktaten
             # verdrängt der bereits erkannte Text den Vortext nach und nach.
             kwargs["initial_prompt"] = self._initial_prompt
-        result: dict[str, Any] = mlx_whisper.transcribe(str(audio_path), **kwargs)
+        result: dict[str, Any] = mlx_whisper.transcribe(samples, **kwargs)
         return result
 
-    def _write_silence(self, path: Path, seconds: float = 0.1) -> None:
-        import soundfile as sf
+    def _prepare(self, recording: Recording) -> AudioArray:
+        """Bringt die Aufnahme ins Whisper-Format: float32, mono, 16 kHz."""
+        samples: AudioArray = np.ascontiguousarray(recording.samples, dtype=np.float32).reshape(-1)
+        rate = recording.sample_rate
+        if rate == _WHISPER_RATE or len(samples) == 0:
+            return samples
 
-        samples = np.zeros(int(self._sample_rate * seconds), dtype=np.float32)
-        sf.write(str(path), samples, self._sample_rate, subtype="PCM_16")
+        if not self._warned_rate:
+            self._warned_rate = True
+            log.warning(
+                "audio.sample_rate = %d wird auf %d Hz umgerechnet (einfache lineare "
+                "Interpolation). Für beste Erkennung audio.sample_rate = 16000 setzen.",
+                rate,
+                _WHISPER_RATE,
+            )
+        target = round(len(samples) * _WHISPER_RATE / rate)
+        positions = np.linspace(0.0, len(samples) - 1, num=max(target, 1))
+        resampled: AudioArray = np.interp(positions, np.arange(len(samples)), samples).astype(
+            np.float32
+        )
+        return resampled

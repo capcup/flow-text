@@ -47,7 +47,7 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 
 | ID | Prio | Category | Status | Summary |
 |----|------|----------|--------|---------|
-| P1 | high | Performance | open | Pass `np.ndarray` to mlx-whisper; drop WAV round trip and hidden ffmpeg dependency |
+| P1 | high | Performance | done (2026-11-10) | Pass `np.ndarray` to mlx-whisper; drop WAV round trip and hidden ffmpeg dependency |
 | P2 | high | Performance | open | `tools/bench.py`: latency + WER on real recordings (also measures quality) |
 | Q1 | high | Quality | open | Silence/noise is transcribed as "Vielen Dank." → gate on RMS, blocklist |
 | Q2 | high | Quality | done (2026-11-10) | Configurable vocabulary via `initial_prompt` (measured WER 4 % → 1 %) |
@@ -190,6 +190,17 @@ word-level Levenshtein distance divided by the number of reference words.
   Update `StubTranscriber` and its tests.
 - *Done when:* no temp WAV in the normal path and no ffmpeg needed. Also
   removes the temp-file cleanup in `_cleanup_temp`.
+
+- *Implemented 2026-11-10:* `Transcriber.transcribe(recording: Recording)`,
+  `Pipeline.run(recording)`, the `jobs` queue carries `Recording`. No temp WAV
+  in the normal path. `audio.delete_after_use` was kept (renaming it would
+  reject existing configs): `false` now dumps each recording as WAV for
+  debugging. Other sample rates are resampled to 16 kHz by linear
+  interpolation (ffmpeg used to do this); 16 kHz stays the recommendation.
+- *Verified:* real `whisper-large-v3-turbo` run with `PATH=/usr/bin:/bin`
+  (no ffmpeg) on a TTS clip: ~1.0 s, correct text. The same clip also showed
+  Q2 working on the real model ("Flowtext mit Olammer" → "FlowText mit
+  Ollama"). Not tested: microphone audio, the built app bundle.
 
 **P2 — Benchmark harness** · high
 - *Fix:* `tools/bench.py`, which takes a folder of `*.wav` + `*.txt`

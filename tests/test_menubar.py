@@ -99,7 +99,7 @@ class FakePipeline:
 
     def shutdown(self) -> None: ...
 
-    def run(self, path: Path) -> str:
+    def run(self, recording: Any) -> str:
         return ""
 
 

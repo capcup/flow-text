@@ -12,11 +12,16 @@ import types
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
+from flowtext.audio.recorder import Recording
 from flowtext.config import PipelineConfig
 from flowtext.pipeline.factory import build_pipeline
 from flowtext.pipeline.stub import LogInjector, NullRefiner, StubTranscriber
+
+#: Eine kurze Aufnahme im Speicher.
+CLIP = Recording(samples=np.zeros(1600, dtype=np.float32), sample_rate=16_000)
 
 
 def _fake_module(name: str, **attrs: Any) -> types.ModuleType:
@@ -82,8 +87,8 @@ class TestMlxTranscriber:
     def _install(self, monkeypatch, result: dict[str, Any] | Exception) -> list[dict[str, Any]]:
         calls: list[dict[str, Any]] = []
 
-        def transcribe(path: str, **kwargs: Any) -> dict[str, Any]:
-            calls.append({"path": path, **kwargs})
+        def transcribe(audio: Any, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"audio": audio, **kwargs})
             if isinstance(result, Exception):
                 raise result
             return result
@@ -97,7 +102,7 @@ class TestMlxTranscriber:
         from flowtext.pipeline.transcribe_mlx import MlxTranscriber
 
         self._install(monkeypatch, {"text": "  hallo welt  ", "language": "de"})
-        result = MlxTranscriber().transcribe(tmp_path / "a.wav")
+        result = MlxTranscriber().transcribe(CLIP)
         assert result.text == "hallo welt"
         assert result.language == "de"
         assert result.seconds >= 0
@@ -107,23 +112,54 @@ class TestMlxTranscriber:
         from flowtext.pipeline.transcribe_mlx import MlxTranscriber
 
         calls = self._install(monkeypatch, {"text": "x"})
-        MlxTranscriber(language="de").transcribe(tmp_path / "a.wav")
+        MlxTranscriber(language="de").transcribe(CLIP)
         assert calls[0]["language"] == "de"
+
+    def test_samples_are_passed_in_memory(self, monkeypatch) -> None:
+        """Kein Dateipfad → mlx-whisper startet kein ffmpeg."""
+        from flowtext.pipeline.transcribe_mlx import MlxTranscriber
+
+        calls = self._install(monkeypatch, {"text": "x"})
+        samples = np.linspace(-1, 1, 1600, dtype=np.float32)
+        MlxTranscriber().transcribe(Recording(samples=samples, sample_rate=16_000))
+        audio = calls[0]["audio"]
+        assert isinstance(audio, np.ndarray)
+        assert audio.dtype == np.float32
+        np.testing.assert_array_equal(audio, samples)
+
+    def test_other_sample_rates_are_resampled_to_16k(self, monkeypatch, caplog) -> None:
+        from flowtext.pipeline.transcribe_mlx import MlxTranscriber
+
+        calls = self._install(monkeypatch, {"text": "x"})
+        transcriber = MlxTranscriber()
+        one_second = Recording(samples=np.ones(48_000, dtype=np.float32), sample_rate=48_000)
+        with caplog.at_level("WARNING"):
+            transcriber.transcribe(one_second)
+            transcriber.transcribe(one_second)
+        assert [len(c["audio"]) for c in calls] == [16_000, 16_000]
+        assert calls[0]["audio"].dtype == np.float32
+        assert caplog.text.count("umgerechnet") == 1  # nur einmal warnen
+
+    def test_warmup_uses_in_memory_silence(self, monkeypatch) -> None:
+        from flowtext.pipeline.transcribe_mlx import MlxTranscriber
+
+        calls = self._install(monkeypatch, {"text": ""})
+        MlxTranscriber().warmup()
+        assert isinstance(calls[0]["audio"], np.ndarray)
+        assert not calls[0]["audio"].any()
 
     def test_vocabulary_becomes_initial_prompt(self, monkeypatch, tmp_path: Path) -> None:
         from flowtext.pipeline.transcribe_mlx import MlxTranscriber
 
         calls = self._install(monkeypatch, {"text": "x"})
-        MlxTranscriber(vocabulary=["FlowText", " Ollama ", "", "FlowText"]).transcribe(
-            tmp_path / "a.wav"
-        )
+        MlxTranscriber(vocabulary=["FlowText", " Ollama ", "", "FlowText"]).transcribe(CLIP)
         assert calls[0]["initial_prompt"] == "FlowText, Ollama."
 
     def test_no_vocabulary_means_no_prompt(self, monkeypatch, tmp_path: Path) -> None:
         from flowtext.pipeline.transcribe_mlx import MlxTranscriber
 
         calls = self._install(monkeypatch, {"text": "x"})
-        MlxTranscriber().transcribe(tmp_path / "a.wav")
+        MlxTranscriber().transcribe(CLIP)
         assert "initial_prompt" not in calls[0]
 
     def test_oversized_vocabulary_warns(self, caplog) -> None:
@@ -136,21 +172,21 @@ class TestMlxTranscriber:
     def test_factory_passes_vocabulary(self, monkeypatch, tmp_path: Path) -> None:
         calls = self._install(monkeypatch, {"text": "x"})
         pipe = build_pipeline(PipelineConfig(injector="none", vocabulary=["Ollama"]))
-        pipe.transcriber.transcribe(tmp_path / "a.wav")
+        pipe.transcriber.transcribe(CLIP)
         assert calls[0]["initial_prompt"] == "Ollama."
 
     def test_no_language_means_autodetect(self, monkeypatch, tmp_path: Path) -> None:
         from flowtext.pipeline.transcribe_mlx import MlxTranscriber
 
         calls = self._install(monkeypatch, {"text": "x"})
-        MlxTranscriber(language=None).transcribe(tmp_path / "a.wav")
+        MlxTranscriber(language=None).transcribe(CLIP)
         assert "language" not in calls[0]
 
     def test_model_is_passed_through(self, monkeypatch, tmp_path: Path) -> None:
         from flowtext.pipeline.transcribe_mlx import MlxTranscriber
 
         calls = self._install(monkeypatch, {"text": "x"})
-        MlxTranscriber(model="mlx-community/whisper-tiny").transcribe(tmp_path / "a.wav")
+        MlxTranscriber(model="mlx-community/whisper-tiny").transcribe(CLIP)
         assert calls[0]["path_or_hf_repo"] == "mlx-community/whisper-tiny"
 
     def test_failure_becomes_transcription_error(self, monkeypatch, tmp_path: Path) -> None:
@@ -158,7 +194,7 @@ class TestMlxTranscriber:
 
         self._install(monkeypatch, RuntimeError("Modell kaputt"))
         with pytest.raises(TranscriptionError, match="Modell kaputt"):
-            MlxTranscriber().transcribe(tmp_path / "a.wav")
+            MlxTranscriber().transcribe(CLIP)
 
     def test_warmup_failure_does_not_raise(self, monkeypatch) -> None:
         """Ein fehlgeschlagenes Warmup darf den Start nicht verhindern."""

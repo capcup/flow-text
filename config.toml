@@ -33,6 +33,8 @@ blocksize = 1024
 # device = "MacBook Pro-Mikrofon"   # leer lassen = Systemstandard
 max_seconds = 300.0        # harte Obergrenze, danach automatischer Stopp
 min_seconds = 0.3          # kürzere Aufnahmen gelten als Fehlbedienung
+# Aufnahmen bleiben im Speicher und landen nie auf der Festplatte. false legt
+# jede Aufnahme zur Fehlersuche als WAV ab (Löschung nach 24 h beim Start).
 delete_after_use = true
 
 [pipeline]

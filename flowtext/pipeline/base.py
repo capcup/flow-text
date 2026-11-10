@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+from ..audio.recorder import Recording
 
 log = logging.getLogger(__name__)
 
@@ -25,13 +26,16 @@ class TranscriptionResult:
 
 @runtime_checkable
 class Transcriber(Protocol):
-    """Audio → Rohtext.
+    """Aufnahme (Samples im Speicher) → Rohtext.
+
+    Die Aufnahme wird direkt übergeben, nicht als Datei: kein Umweg über die
+    Festplatte und kein externes ``ffmpeg`` zum Wiedereinlesen.
 
     Optional: ``warmup()`` zum Vorladen des Modells und ``shutdown()`` zum
     Aufräumen. :class:`Pipeline` ruft beide auf, wenn sie existieren.
     """
 
-    def transcribe(self, audio_path: Path) -> TranscriptionResult: ...
+    def transcribe(self, recording: Recording) -> TranscriptionResult: ...
 
 
 @runtime_checkable
@@ -101,9 +105,9 @@ class Pipeline:
             except Exception:
                 log.debug("Shutdown einer Pipeline-Stufe fehlgeschlagen.", exc_info=True)
 
-    def run(self, audio_path: Path) -> str:
+    def run(self, recording: Recording) -> str:
         started = time.perf_counter()
-        result = self.transcriber.transcribe(audio_path)
+        result = self.transcriber.transcribe(recording)
         text = result.text.strip()
         log.info(
             "Transcribed in %.2fs: %r",

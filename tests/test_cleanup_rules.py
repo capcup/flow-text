@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from flowtext.audio.recorder import Recording
 from flowtext.config import CleanupConfig, PipelineConfig
 from flowtext.pipeline.base import Pipeline, TranscriptionResult
 from flowtext.pipeline.cleanup_rules import RuleBasedCleaner
 from flowtext.pipeline.factory import build_pipeline
+
+#: Eine kurze Aufnahme im Speicher — die Fakes werten sie nicht aus.
+CLIP = Recording(samples=np.zeros(1600, dtype=np.float32), sample_rate=16_000)
 
 
 @pytest.mark.parametrize(
@@ -79,7 +84,7 @@ class _Transcriber:
     def __init__(self, text: str) -> None:
         self.text = text
 
-    def transcribe(self, audio_path: Path) -> TranscriptionResult:
+    def transcribe(self, recording: Recording) -> TranscriptionResult:
         return TranscriptionResult(text=self.text, language="de")
 
 
@@ -103,7 +108,7 @@ class _SpyRefiner:
 def test_cleaner_runs_before_refiner(tmp_path: Path) -> None:
     refiner, injector = _SpyRefiner(), _Injector()
     pipe = Pipeline(_Transcriber("Äh, hallo."), refiner, injector, cleaner=RuleBasedCleaner("de"))
-    assert pipe.run(tmp_path / "a.wav") == "Hallo."
+    assert pipe.run(CLIP) == "Hallo."
     assert refiner.seen == ["Hallo."]
     assert injector.received == ["Hallo."]
 
@@ -111,7 +116,7 @@ def test_cleaner_runs_before_refiner(tmp_path: Path) -> None:
 def test_only_fillers_means_no_output(tmp_path: Path) -> None:
     refiner, injector = _SpyRefiner(), _Injector()
     pipe = Pipeline(_Transcriber("Ähm."), refiner, injector, cleaner=RuleBasedCleaner("de"))
-    assert pipe.run(tmp_path / "a.wav") == ""
+    assert pipe.run(CLIP) == ""
     assert refiner.seen == []
     assert injector.received == []
 
@@ -123,7 +128,7 @@ def test_failing_cleaner_falls_back_to_raw_text(tmp_path: Path) -> None:
 
     injector = _Injector()
     pipe = Pipeline(_Transcriber("Äh, hallo."), None, injector, cleaner=Broken())
-    assert pipe.run(tmp_path / "a.wav") == "Äh, hallo."
+    assert pipe.run(CLIP) == "Äh, hallo."
     assert injector.received == ["Äh, hallo."]
 
 

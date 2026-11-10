@@ -104,6 +104,10 @@ not removable bloat. `dist/` is correctly gitignored.
 - **Q6** — `[cleanup.replacements]` applies fixed corrections after
   transcription.
 
-Local state after these: `ruff`, `mypy --strict` clean, 313 tests passing.
-Q2 and Q6 are covered by unit tests with a mocked `mlx_whisper`; neither has
-been checked against real dictations yet.
+- **P1** — recordings go to Whisper in memory. No temp WAV, and the hidden
+  `ffmpeg` dependency is gone.
+
+Local state after these: `ruff`, `mypy --strict` clean, 319 tests passing.
+P1 and Q2 were additionally run against the real model on a synthesised clip
+with no ffmpeg on `PATH`. Nothing has been checked against real microphone
+dictations yet.

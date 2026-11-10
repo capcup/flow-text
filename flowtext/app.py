@@ -18,7 +18,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from .audio.recorder import AudioError, AudioRecorder
+from .audio.recorder import AudioError, AudioRecorder, Recording
 from .config import Config, temp_dir
 from .feedback import Feedback
 from .hotkey.detectors import Signal
@@ -29,7 +29,8 @@ from .state import State, StateMachine
 
 log = logging.getLogger(__name__)
 
-#: Ältere temporäre Aufnahmen werden beim Start entfernt.
+#: Behaltene Aufnahmen (``audio.delete_after_use = false``) werden nach
+#: dieser Zeit beim Start entfernt.
 _STALE_TEMP_AGE_SECONDS = 24 * 3600
 
 #: Sicherheitsnetz für den frühen Start: bleibt eine vorläufig gestartete
@@ -50,7 +51,7 @@ class FlowTextApp:
         self.cfg = cfg
         self.state = StateMachine()
         self.events: queue.Queue[str] = queue.Queue(maxsize=8)
-        self.jobs: queue.Queue[Path] = queue.Queue(maxsize=4)
+        self.jobs: queue.Queue[Recording] = queue.Queue(maxsize=4)
 
         self.recorder = recorder or AudioRecorder(cfg.audio)
         self.hotkey = hotkey or HotkeyService(cfg.hotkey, self.events)
@@ -279,18 +280,12 @@ class FlowTextApp:
         if recording.peak < 0.001:
             log.warning("Audio signal is practically silent — wrong input device?")
 
+        # Die Samples gehen direkt aus dem Speicher an die Pipeline — keine
+        # Datei, kein ffmpeg.
         try:
-            path = self.recorder.save(recording, self._new_temp_path())
-        except Exception as exc:  # noqa: BLE001 — auch ImportError (soundfile fehlt)
-            log.error("Audiodatei konnte nicht geschrieben werden: %s", exc)
-            self._to_error()
-            return
-
-        try:
-            self.jobs.put_nowait(path)
+            self.jobs.put_nowait(recording)
         except queue.Full:
             log.error("Verarbeitungswarteschlange voll — Aufnahme verworfen.")
-            path.unlink(missing_ok=True)
             self._to_error()
 
     def _check_max_duration(self) -> None:
@@ -305,19 +300,31 @@ class FlowTextApp:
     def _worker_loop(self) -> None:
         while not self._stop.is_set():
             try:
-                path = self.jobs.get(timeout=0.2)
+                recording = self.jobs.get(timeout=0.2)
             except queue.Empty:
                 continue
-            try:
-                self.pipeline.run(path)
-            except Exception:
-                log.exception("Verarbeitung fehlgeschlagen.")
-                self._to_error()
-            else:
-                self.state.transition(State.IDLE)
-            finally:
-                if self.cfg.audio.delete_after_use:
-                    path.unlink(missing_ok=True)
+            self._process(recording)
+
+    def _process(self, recording: Recording) -> None:
+        try:
+            self.pipeline.run(recording)
+        except Exception:
+            log.exception("Verarbeitung fehlgeschlagen.")
+            self._to_error()
+        else:
+            self.state.transition(State.IDLE)
+        finally:
+            if not self.cfg.audio.delete_after_use:
+                self._keep_recording(recording)
+
+    def _keep_recording(self, recording: Recording) -> None:
+        """Legt die Aufnahme als WAV ab — nur zur Fehlersuche, nie im Normalbetrieb."""
+        try:
+            path = self.recorder.save(recording, self._new_temp_path())
+        except Exception as exc:  # noqa: BLE001 — auch ImportError (soundfile fehlt)
+            log.warning("Aufnahme konnte nicht abgelegt werden: %s", exc)
+            return
+        log.info("Aufnahme behalten: %s", path)
 
     # --------------------------------------------------------------- Helfer
 

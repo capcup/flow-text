@@ -83,7 +83,9 @@ class AudioConfig:
     #: Kürzere Aufnahmen gelten als Fehlbedienung und werden verworfen.
     min_seconds: float = 0.3
 
-    #: WAV-Datei nach erfolgreicher Verarbeitung löschen.
+    #: Im Normalbetrieb entsteht keine Datei: die Aufnahme bleibt im Speicher.
+    #: ``False`` legt jede Aufnahme zur Fehlersuche als WAV im Temp-Ordner ab
+    #: (wird beim Start nach 24 h gelöscht).
     delete_after_use: bool = True
 
 

@@ -65,14 +65,17 @@ class FakeHotkey:
 
 class FakePipeline:
     def __init__(self) -> None:
-        self.runs: list[Path] = []
+        self.runs: list[Recording] = []
+        self.error: Exception | None = None
 
     def warmup(self) -> None: ...
 
     def shutdown(self) -> None: ...
 
-    def run(self, path: Path) -> str:
-        self.runs.append(path)
+    def run(self, recording: Recording) -> str:
+        self.runs.append(recording)
+        if self.error:
+            raise self.error
         return "text"
 
 
@@ -151,23 +154,59 @@ def test_max_duration_check_is_noop_when_idle(make_app) -> None:
     assert app.state.current is State.IDLE
 
 
-def test_worker_processes_job_and_deletes_file(make_app) -> None:
-    app = make_app()
+def test_recording_stays_in_memory(make_app, tmp_path: Path) -> None:
+    """Normalbetrieb: die Samples gehen direkt an die Pipeline, keine Datei."""
+    recorder = FakeRecorder()
+    app = make_app(recorder)
     app._on_trigger()
     app._on_trigger()
-    path = app.jobs.get_nowait()
-    assert path.exists()
+    recording = app.jobs.get_nowait()
+    assert isinstance(recording, Recording)
 
-    app.pipeline.run(path)  # type: ignore[union-attr]
-    app.state.transition(State.IDLE)
-    path.unlink()
+    app._process(recording)
+    assert app.pipeline.runs == [recording]
+    assert app.state.current is State.IDLE
+    assert recorder.saved == []
+    assert not (tmp_path / "tmp").exists()
+
+
+def test_recording_is_kept_when_configured(make_app, tmp_path: Path) -> None:
+    cfg = Config()
+    cfg.audio.delete_after_use = False
+    recorder = FakeRecorder()
+    app = make_app(recorder, cfg)
+    app._on_trigger()
+    app._on_trigger()
+    app._process(app.jobs.get_nowait())
+    assert len(recorder.saved) == 1
+    assert recorder.saved[0].parent == tmp_path / "tmp"
+
+
+def test_failed_processing_returns_to_idle(make_app) -> None:
+    app = make_app()
+    app.pipeline.error = RuntimeError("Modell fehlt")
+    app._on_trigger()
+    app._on_trigger()
+    app._process(app.jobs.get_nowait())
+    assert app.state.current is State.IDLE  # über ERROR zurück nach IDLE
+
+
+def test_failing_debug_dump_does_not_break_processing(make_app) -> None:
+    cfg = Config()
+    cfg.audio.delete_after_use = False
+    recorder = FakeRecorder()
+    recorder.save = lambda recording, path: (_ for _ in ()).throw(OSError("voll"))  # type: ignore[method-assign]
+    app = make_app(recorder, cfg)
+    app._on_trigger()
+    app._on_trigger()
+    app._process(app.jobs.get_nowait())
     assert app.state.current is State.IDLE
 
 
 def test_full_queue_does_not_wedge_the_state(make_app) -> None:
     app = make_app()
     for _ in range(app.jobs.maxsize):
-        app.jobs.put_nowait(Path("/tmp/dummy.wav"))
+        app.jobs.put_nowait(Recording(samples=np.zeros(16, dtype=np.float32), sample_rate=16000))
     app._on_trigger()
     app._on_trigger()
     assert app.state.current is State.IDLE  # über ERROR zurück nach IDLE
