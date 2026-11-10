@@ -180,6 +180,8 @@ def test_recording_is_kept_when_configured(make_app, tmp_path: Path) -> None:
     app._process(app.jobs.get_nowait())
     assert len(recorder.saved) == 1
     assert recorder.saved[0].parent == tmp_path / "tmp"
+    # Das Transkript liegt daneben — Rohmaterial für tools/bench.py.
+    assert recorder.saved[0].with_suffix(".txt").read_text(encoding="utf-8") == "text\n"
 
 
 def test_failed_processing_returns_to_idle(make_app) -> None:

@@ -327,6 +327,7 @@ class FlowTextApp:
             self._process(recording)
 
     def _process(self, recording: Recording) -> None:
+        text = ""
         try:
             text = self.pipeline.run(recording)
         except Exception:
@@ -339,12 +340,14 @@ class FlowTextApp:
             self.state.transition(State.IDLE)
         finally:
             if not self.cfg.audio.delete_after_use:
-                self._keep_recording(recording)
+                self._keep_recording(recording, text)
 
-    def _keep_recording(self, recording: Recording) -> None:
-        """Legt die Aufnahme als WAV ab — nur zur Fehlersuche, nie im Normalbetrieb."""
+    def _keep_recording(self, recording: Recording, text: str) -> None:
+        """Legt Aufnahme und Transkript ab — nur zur Fehlersuche und als
+        Material für ``tools/bench.py``, nie im Normalbetrieb."""
         try:
             path = self.recorder.save(recording, self._new_temp_path())
+            path.with_suffix(".txt").write_text(text + "\n", encoding="utf-8")
         except Exception as exc:  # noqa: BLE001 — auch ImportError (soundfile fehlt)
             log.warning("Aufnahme konnte nicht abgelegt werden: %s", exc)
             return
@@ -369,7 +372,7 @@ class FlowTextApp:
         if not directory.is_dir():
             return
         now = time.time()
-        for path in directory.glob("recording-*.wav"):
+        for path in directory.glob("recording-*.*"):
             try:
                 if now - path.stat().st_mtime > _STALE_TEMP_AGE_SECONDS:
                     path.unlink()

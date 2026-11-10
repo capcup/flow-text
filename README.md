@@ -266,7 +266,7 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 
 ## 🧪 Developer Testing & Verification
 
-FlowText comes with a comprehensive test suite of 223 automated tests that run without requiring real microphone input or active macOS GUI permissions:
+FlowText comes with a comprehensive test suite of more than 360 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
 # Run test suite
@@ -276,6 +276,16 @@ pytest
 ruff check . && ruff format --check .
 mypy --strict
 ```
+
+### Measuring recognition quality on your own voice
+
+`tools/bench.py` runs the pipeline over a folder of recordings and reports latency and word error rate:
+
+```bash
+python tools/bench.py my-dictations/ --plain --details
+```
+
+The folder holds `*.wav` files and, next to each, an optional `*.txt` with what was actually said (an empty file means "nothing should be recognised"). `--plain` adds a run without vocabulary, clean-up and silence gate, so you can see what those options change. To collect material, set `delete_after_use = false` under `[audio]`: every dictation is then kept as WAV plus transcript in `~/Library/Application Support/FlowText/tmp` for 24 hours. Copy the files out and correct the transcripts by hand.
 
 ---
 

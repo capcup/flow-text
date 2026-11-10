@@ -48,11 +48,11 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | ID | Prio | Category | Status | Summary |
 |----|------|----------|--------|---------|
 | P1 | high | Performance | done (2026-11-10) | Pass `np.ndarray` to mlx-whisper; drop WAV round trip and hidden ffmpeg dependency |
-| P2 | high | Performance | open | `tools/bench.py`: latency + WER on real recordings (also measures quality) |
-| Q1 | high | Quality | open | Silence/noise is transcribed as "Vielen Dank." → gate on RMS, blocklist |
+| P2 | high | Performance | done (2026-11-10) | `tools/bench.py`: latency + WER on real recordings (also measures quality) |
+| Q1 | high | Quality | done (2026-11-10) | Silence/noise is transcribed as "Vielen Dank." → gate on RMS, blocklist |
 | Q2 | high | Quality | done (2026-11-10) | Configurable vocabulary via `initial_prompt` (measured WER 4 % → 1 %) |
 | Q6 | high | Quality | done (2026-11-10) | Fixed replacements after transcription (`cleanup.replacements`) |
-| B1 | high | Bug | open | Clipboard restore wipes images/files; overwrites user copies |
+| B1 | high | Bug | done (2026-11-10) | Clipboard restore wipes images/files; overwrites user copies |
 | B2 | high | Bug | open | Config values not type-checked (`"false"` is truthy) |
 | R1 | high | Robustness & privacy | open | Transcript text written to the log file at INFO |
 | D1 | high | Docs/tooling/git | done (2026-11-10, 2905d8e) | Commit the pending uncommitted work on `main` |
@@ -65,7 +65,7 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | Q5 | med  | Quality | open | Refiner: re-evaluate model (`qwen2.5:7b`), harden prompt and output guards |
 | B3 | med  | Bug | open | `config.local.toml` replaces instead of overriding `config.toml` |
 | B4 | med  | Bug | open | `set_paused` races with the controller thread |
-| R2 | med  | Robustness & privacy | open | ⚠️ error icon is never visible (ERROR→IDLE instantly) |
+| R2 | med  | Robustness & privacy | done (2026-11-10) | ⚠️ error icon is never visible (ERROR→IDLE instantly) |
 | R3 | med  | Robustness & privacy | open | New audio devices (AirPods/USB) not seen while running |
 | R4 | med  | Robustness & privacy | open | Config lookup depends on the working directory |
 | U1 | med  | UX | open | Text is pasted into whatever app is in front at the *end* |
@@ -79,6 +79,24 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | D4 | low  | Docs/tooling/git | open | CI: add Python 3.13 and coverage |
 
 ---
+
+## Results 2026-11-10 (after P1, P2, Q1, Q2)
+
+First run of `tools/bench.py` with the real `whisper-large-v3-turbo`, no
+ffmpeg on `PATH`. Six clips: four TTS sentences (0.8–11.6 s), 2 s digital
+silence, 3 s noise (σ = 0.003). **Still synthetic audio**, so this confirms
+the mechanisms, not the thresholds.
+
+| Variant | Median latency | Mean WER |
+|---|---|---|
+| `config` (vocabulary, filler removal, silence gate) | 918 ms | 1 % |
+| `plain` (none of the three) | 952 ms | 36 % |
+
+- Silence and noise: `plain` returns "Vielen Dank." for both; `config`
+  skips them in 0 ms.
+- A really spoken "Vielen Dank." (0.8 s) still comes through with the gate on.
+- Vocabulary: "Flowtext mit Olamour" → "FlowText mit Ollama".
+- The remaining 4 % on the long clip is "14 Uhr" vs. "vierzehn Uhr" (formatting).
 
 ## Measurements (2026-10-27)
 
@@ -211,6 +229,14 @@ word-level Levenshtein distance divided by the number of reference words.
 - *Done when:* about 20 real dictations (short, medium, long, quiet, noisy)
   can be benchmarked with one command. Prerequisite for P3 and for tuning Q1.
 
+- *Implemented 2026-11-10:* `flowtext/bench.py` + `tools/bench.py <folder>`
+  (`--plain`, `--model`, `--details`, `--repeats`). Runs the pipeline exactly
+  as the app builds it, minus the injector. An empty `.txt` means "nothing
+  should be recognised". Collecting: `audio.delete_after_use = false` now
+  writes the transcript next to each WAV.
+- *Still open:* the ~20 real dictations themselves. Only the user can record
+  them.
+
 **P3 — Shortened encoder window (largest speed lever)** · med
 - *Depends on:* P1, P2.
 - *Fix:* own transcription path (`mlx_whisper.decoding.decode` on a mel
@@ -269,6 +295,14 @@ word-level Levenshtein distance divided by the number of reference words.
   "Untertitel im Auftrag des ZDF…", "Untertitel der Amara.org-Community",
   "Danke fürs Zuschauen") when the audio was quiet or short.
 - *Done when:* silence/noise produce no paste; test covers both paths.
+
+- *Implemented 2026-11-10:* `pipeline/guard.py` `SpeechGuard`, wired into
+  `Pipeline.run`; `pipeline.silence_threshold` (default 0.005, 0 = off). The
+  level is the RMS of the fourth-loudest 50 ms window rather than the
+  whole-clip RMS, so pauses do not hide quiet speech and one key click does
+  not count. Subtitle credits are always dropped, courtesies only below
+  4 × threshold. The level is logged with every recording.
+- *Still open:* calibrating 0.005 against real microphone recordings (P2).
 
 **Q2 — Vocabulary prompt** · high
 - *Where:* `config.py` `PipelineConfig`, `pipeline/transcribe_mlx.py`
@@ -380,6 +414,13 @@ word-level Levenshtein distance divided by the number of reference words.
   is unchanged. Mark our write with `org.nspasteboard.TransientType` /
   `ConcealedType` so clipboard managers skip the transcript.
 
+- *Implemented 2026-11-10:* as described, plus: back-to-back dictations keep
+  the original content, and the Transient marker is only set when the
+  transcript will be removed again. `ConcealedType` was left out (it is meant
+  for secrets). pyperclip stays as fallback and no longer restores `""`.
+  Tested against a private `NSPasteboard`; not yet tried by hand with a real
+  image and a clipboard manager.
+
 **B2 — No type validation in config** · high
 - *Where:* `config.py` `_apply`, `validate`.
 - *Problem:* values are `setattr`'d unchecked. `early_start = "false"` and
@@ -417,6 +458,10 @@ word-level Levenshtein distance divided by the number of reference words.
   bar polls every 200 ms (`menubar.py` `_tick`). Keep a "last error" (message
   + timestamp) visible for ~5 s or until the next trigger, and show
   `rumps.notification` with the reason.
+
+- *Implemented 2026-11-10:* `app.Notice`; shown for 6 s or until the next
+  recording, one `rumps.notification` per error. "No speech detected" is a
+  hint without icon or notification. Not checked in the running menu bar app.
 
 **R3 — Audio hot-plug** · med
 - PortAudio enumerates devices once at init. In a long-running menu bar

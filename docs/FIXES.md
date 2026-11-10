@@ -107,7 +107,17 @@ not removable bloat. `dist/` is correctly gitignored.
 - **P1** — recordings go to Whisper in memory. No temp WAV, and the hidden
   `ffmpeg` dependency is gone.
 
-Local state after these: `ruff`, `mypy --strict` clean, 319 tests passing.
-P1 and Q2 were additionally run against the real model on a synthesised clip
-with no ffmpeg on `PATH`. Nothing has been checked against real microphone
-dictations yet.
+- **Q1** — silence and noise are no longer transcribed; known Whisper
+  phantoms are dropped (`pipeline.silence_threshold`).
+- **B1** — the clipboard is saved and restored through `NSPasteboard` with
+  all data types; a copy made by the user in the meantime is left alone.
+- **R2** — errors stay visible in the menu bar for six seconds and raise a
+  system notification.
+- **P2** — `tools/bench.py` measures latency and WER on a folder of
+  recordings.
+
+Local state after these: `ruff`, `mypy --strict` clean, 368 tests passing.
+P1, Q1 and Q2 were additionally run against the real model on synthesised
+clips with no ffmpeg on `PATH` (numbers in `IMPROVEMENTS.md`). Nothing has
+been checked against real microphone dictations, and B1 and R2 have not been
+tried by hand in the running app.

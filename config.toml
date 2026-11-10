@@ -34,7 +34,9 @@ blocksize = 1024
 max_seconds = 300.0        # harte Obergrenze, danach automatischer Stopp
 min_seconds = 0.3          # kürzere Aufnahmen gelten als Fehlbedienung
 # Aufnahmen bleiben im Speicher und landen nie auf der Festplatte. false legt
-# jede Aufnahme zur Fehlersuche als WAV ab (Löschung nach 24 h beim Start).
+# jede Aufnahme als WAV samt Transkript (.txt) ab, unter
+# ~/Library/Application Support/FlowText/tmp — zur Fehlersuche und als
+# Material für tools/bench.py. Löschung nach 24 h beim nächsten Start.
 delete_after_use = true
 
 [pipeline]

@@ -40,6 +40,7 @@ flowtext/
 ├── config.py               dataclasses, TOML loading, validation
 ├── permissions.py           Accessibility / Input Monitoring checks
 ├── diagnostics.py            shared logic for --watch-keys / tools/diagnose.py
+├── bench.py                  latency + WER on a folder of recordings (tools/bench.py)
 ├── feedback.py                 sound feedback (afplay)
 ├── logging_setup.py             console + rotating file logging
 ├── menubar.py                    rumps status-bar UI

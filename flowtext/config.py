@@ -84,7 +84,8 @@ class AudioConfig:
     min_seconds: float = 0.3
 
     #: Im Normalbetrieb entsteht keine Datei: die Aufnahme bleibt im Speicher.
-    #: ``False`` legt jede Aufnahme zur Fehlersuche als WAV im Temp-Ordner ab
+    #: ``False`` legt jede Aufnahme als WAV samt Transkript (.txt) im
+    #: Temp-Ordner ab — zur Fehlersuche und als Material für ``tools/bench.py``
     #: (wird beim Start nach 24 h gelöscht).
     delete_after_use: bool = True
 
