@@ -15,7 +15,12 @@ Unlike cloud-based speech-to-text tools, **FlowText runs 100% offline on your Ma
 * ⌨️ **Double-Tap Hotkey**: Simply double-tap the **`⌘` Command key** (or custom shortcuts) anywhere on macOS to start and stop dictation.
 * 🤖 **Optional Power-User LLM Refinement**: Optional grammar correction and formatting via local `Ollama` models (disabled by default, no setup required).
 * 📋 **Universal Text Injection**: Automatically pastes transcribed text into whatever text field or application you are currently typing in (`Cmd+V`).
-* 🖥️ **Menu Bar Integration**: Displays live status (Ready ⚪, Recording 🔴, Processing 🟡, Paused ⏸️) in your macOS menu bar.
+* 🖥️ **Menu Bar Integration**: Displays live status (Ready 🎙, Recording 🔴, Processing ⏳, Paused ⏸) in your macOS menu bar, names the reason when something goes wrong, and has a **Settings…** window.
+* 🧹 **Cleaner Text**: Optionally removes filler words ("äh", "ähm") and stutters, applies your own fixed corrections, and gives Whisper a vocabulary of names and terms to spell correctly — all without Ollama.
+* 🤫 **No Invented Text**: Silence and background noise are not transcribed, so Whisper no longer answers them with "Vielen Dank." (see `silence_threshold`).
+* ✂️ **Live Insertion (optional)**: Text can appear after each pause while you are still speaking, so long dictations don't end with a long wait.
+* 📋 **Clipboard-Friendly**: Images, files and rich text on your clipboard survive a dictation, and clipboard managers skip the transcript.
+* 📦 **No Extra Tools**: Audio stays in memory and goes straight to Whisper — no temporary files, and no `ffmpeg` needed.
 * 🛡️ **Sub-Millisecond Engine**: Non-blocking architecture (< 1ms callback latency) with an automated watchdog that keeps keyboard listeners alive.
 * 🔐 **Standalone App Bundle**: Build `FlowText.app` in one command so macOS permissions belong to FlowText — not to your Terminal.
 
@@ -96,6 +101,8 @@ macOS has strict security settings for reading keyboard shortcuts and accessing 
 * **Start Recording:** Double-tap the **`⌘` Command key** (press it twice quickly). You will hear a short sound and see the menu bar icon turn red 🔴. (With `early_start = true` the microphone already opens on the second key *press*, so you can start speaking right away; the sound follows on release. If it turns out not to be a double-tap — e.g. you hold ⌘ or press `⌘V` — the short recording is discarded silently.)
 * **Speak:** Dictate your text into your microphone.
 * **Stop Recording:** Double-tap the **`⌘` Command key** again. FlowText will transcribe your speech and automatically paste the text into your active app!
+* **Nothing came out?** If the recording was silent, nothing is pasted and the menu bar says "No speech detected" for a few seconds. If your voice is quiet and gets swallowed, lower `silence_threshold` (see below); the measured level of every recording is in the log.
+* **Live insertion:** With `[streaming] enabled = true` (or the switch in **Settings…**) the text is pasted after each pause *while you speak* instead of all at once at the end. It lands wherever the cursor is, so don't switch apps mid-dictation, and what is pasted can't be corrected afterwards. It only helps for longer dictations (more than ~10 seconds).
 
 ---
 
@@ -116,7 +123,7 @@ The icon shows you what FlowText is doing at a glance:
 | ⏳ | Transcribing |
 | ⏸ | Paused |
 | 🔒 | Permissions missing — use the menu to grant them |
-| ⚠️ | Error — check the log |
+| ⚠️ | Error — the menu's status line names the reason for a few seconds; details are in the log |
 
 Click the icon for: pause/resume, **Settings…**, the permission shortcuts, the log file, quit.
 
@@ -136,11 +143,11 @@ python tools/make_app.py     # creates dist/FlowText.app
 open dist/FlowText.app
 ```
 
-The menu bar icon appears right away. On a fresh app it shows **🔒 "Berechtigungen
-fehlen"** — that's expected: a brand-new app has no permissions yet. Use the menu
-entries **"Bedienungshilfen freigeben …"** and **"Eingabeüberwachung freigeben …"** to
-jump straight to the right settings pane, then add `FlowText.app` there. The lock
-disappears within a couple of seconds — no restart needed.
+The menu bar icon appears right away. On a fresh app it shows **🔒 "Permissions
+missing"** — that's expected: a brand-new app has no permissions yet. Use the menu
+entries **"Grant Accessibility…"** and **"Grant Input Monitoring…"** to jump straight
+to the right settings pane, then add `FlowText.app` there. The lock disappears within a
+couple of seconds — no restart needed.
 
 Once it works, go back to **System Settings → Privacy & Security** and switch those
 permissions **off for your Terminal**. FlowText keeps working — your Terminal no longer
@@ -191,20 +198,23 @@ If the app doesn't launch, the reason is in `~/Library/Logs/FlowText/launcher.lo
 
 ## ⚙️ Configuration (`config.toml`)
 
-FlowText can be customized by editing the `config.toml` file in the project folder. You can open it in any text editor.
+FlowText can be customized by editing the `config.toml` file in the project folder. You can open it in any text editor, or use **Open config.toml…** in the menu bar's **Settings…** window.
+
+> The four switches in **Settings…** (live insertion, filler words, sounds, vocabulary) are remembered in `~/Library/Application Support/FlowText/preferences.json` and win over `config.toml`. Delete that file to go back to the values below. Starting with `--config <file>` ignores it.
 
 ```toml
 [hotkey]
 mode = "double_tap"       # Options: "double_tap" or "combo"
 tap_key = "cmd"           # Options: "cmd", "shift_r", "ctrl_r", "alt_l"
-double_tap_window = 0.40  # Time allowed between two taps (seconds)
-max_tap_duration = 0.35   # Maximum tap hold duration
+double_tap_window = 0.50  # Time allowed between two taps (seconds)
+max_tap_duration = 0.45   # Maximum tap hold duration
 early_start = true        # Open the mic on the 2nd key *press* so the first words aren't cut off
 
 [audio]
 sample_rate = 16000
 max_seconds = 300.0        # Maximum recording length (5 minutes)
 min_seconds = 0.3          # Recordings shorter than 0.3s are ignored
+delete_after_use = true    # false = keep every dictation as WAV + transcript for 24 h (for tools/bench.py)
 
 [pipeline]
 transcriber = "mlx"       # Uses mlx-whisper (or "stub" for dry-runs)
@@ -216,7 +226,10 @@ refiner = "none"          # Standalone default ("none"). Set to "ollama" if desi
 injector = "clipboard"    # Copies text and performs Cmd+V
 
 [streaming]
-enabled = false           # true = insert text after each pause WHILE you speak (see config.toml)
+enabled = false           # true = insert text after each pause WHILE you speak
+pause_seconds = 0.7       # how long it must be quiet before a part ends
+min_segment_seconds = 2.0 # shorter parts are not split off
+max_segment_seconds = 20.0 # longer parts are split at the quietest spot (max. 25)
 
 [cleanup]
 remove_fillers = false    # true = strip "äh", "ähm", "hm" and stutters ("ich ich"). Rule-based, no Ollama needed.
@@ -240,7 +253,7 @@ remove_fillers = false    # true = strip "äh", "ähm", "hm" and stutters ("ich 
 
 FlowText works 100% standalone out-of-the-box (`refiner = "none"`). Installing Ollama is **completely optional**.
 
-If you wish to automatically clean up filler words ("um", "uh"), fix complex grammar, or reformat speech into bullet points using a local LLM:
+Filler words ("äh", "ähm") and stutters are already handled without Ollama by `[cleanup] remove_fillers`. If you additionally want a local LLM to fix punctuation and grammar:
 
 1. Download and install [Ollama](https://ollama.com).
 2. Download a model in your terminal:
@@ -248,6 +261,8 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
    ollama pull qwen2.5:7b
    ```
 3. Set `refiner = "ollama"` in your `config.toml`.
+
+> ⚠️ **Not benchmarked yet.** `qwen2.5:7b` is a placeholder default: its German is not its strength and it adds noticeable waiting time per dictation. Planned: a faster model, a safer prompt and a check that the model only removes words (see Q4/Q5 in [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md)).
 
 > 🛡️ **Fail-Safe Guarantee:** If Ollama is enabled but not running or unresponsive, FlowText automatically falls back to raw Whisper transcription — your dictation will never fail or drop text.
 
@@ -261,6 +276,9 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 | **Hotkey triggers another app** | Shortcut conflict (e.g., Claude for Mac uses double-tap Option). | Default is set to `cmd` (Command key). You can change `tap_key` in `config.toml` to `shift_r` or `ctrl_r`. |
 | **Recording starts, but output is empty** | Microphone permission missing or wrong audio input device. | Run `python tools/diagnose.py` to test your microphone input level. |
 | **First dictation takes long** | Whisper model downloading on first launch (~1.5 GB). | FlowText warms up the model automatically during startup. |
+| **Nothing is pasted, the menu says "No speech detected"** | The recording was quieter than `silence_threshold` (default 0.005), or really silent. | Check the level printed in the log (`speech level …`). If your speech is below the threshold, lower `silence_threshold`; `0` switches the check off. |
+| **Live insertion pasted into the wrong place** | The text goes where the cursor is at the moment of each pause. | Don't switch apps while dictating, or turn **Live insertion** off in **Settings…**. |
+| **Do I need `ffmpeg`?** | No. | Audio goes straight from memory to Whisper. Older versions needed it; you can ignore it now. |
 | **Do I need Ollama installed?** | No! | FlowText runs 100% standalone with Whisper by default (`refiner = "none"`). |
 | **I don't want Terminal to read my keystrokes** | Permissions belong to whichever app starts FlowText. | Build the standalone app: `python tools/make_app.py` (see Step 7), then switch the permissions off for Terminal. |
 | **App bundle won't start** | Wrong project path, or the `.venv` moved. | Check `~/Library/Logs/FlowText/launcher.log`, then rebuild with `python tools/make_app.py`. |
@@ -271,7 +289,7 @@ If you wish to automatically clean up filler words ("um", "uh"), fix complex gra
 
 ## 🧪 Developer Testing & Verification
 
-FlowText comes with a comprehensive test suite of more than 360 automated tests that run without requiring real microphone input or active macOS GUI permissions:
+FlowText comes with a comprehensive test suite of more than 400 automated tests that run without requiring real microphone input or active macOS GUI permissions:
 
 ```bash
 # Run test suite
@@ -291,6 +309,12 @@ python tools/bench.py my-dictations/ --plain --details
 ```
 
 The folder holds `*.wav` files and, next to each, an optional `*.txt` with what was actually said (an empty file means "nothing should be recognised"). `--plain` adds a run without vocabulary, clean-up and silence gate, so you can see what those options change. To collect material, set `delete_after_use = false` under `[audio]`: every dictation is then kept as WAV plus transcript in `~/Library/Application Support/FlowText/tmp` for 24 hours. Copy the files out and correct the transcripts by hand.
+
+---
+
+## 🗺️ What's next
+
+Open work, measurements and the reasoning behind them live in [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md); [`docs/FIXES.md`](docs/FIXES.md) records what has been done.
 
 ---
 

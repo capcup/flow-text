@@ -69,7 +69,7 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | R3 | med  | Robustness & privacy | open | New audio devices (AirPods/USB) not seen while running |
 | R4 | med  | Robustness & privacy | open | Config lookup depends on the working directory |
 | U1 | med  | UX | open | Text is pasted into whatever app is in front at the *end* |
-| D2 | med  | Docs/tooling/git | open | README/PROJECT_PLAN out of date |
+| D2 | med  | Docs/tooling/git | partial (2026-11-10) | README/PROJECT_PLAN out of date |
 | Q3 | low  | Quality | open | `condition_on_previous_text=False` against repetition loops |
 | R5 | low  | Robustness & privacy | open | osascript Cmd+V needs an undocumented Automation permission |
 | U2 | low  | UX | open | Trigger during PROCESSING is silently dropped |
@@ -550,6 +550,9 @@ word-level Levenshtein distance divided by the number of reference words.
 - README says 223 tests; there are 266.
 - The permission count differs between README and PROJECT_PLAN ("two",
   then lists three), and Automation is missing (R5). ffmpeg is missing (P1).
+- *Updated 2026-11-10:* tap defaults (0.50 / 0.45), menu labels, test count,
+  feature list, new options, FAQ rows. *Still open:* the permission count
+  (Automation is not mentioned, see R5) and `docs/PROJECT_PLAN.md`.
 
 **D3 — Language** · low
 - Log messages are half German, half English; the UI is English; config
