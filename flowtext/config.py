@@ -177,6 +177,15 @@ class StreamingConfig:
 
 
 @dataclass
+class OverlayConfig:
+    """Kleine Anzeige am Bildschirmrand, solange aufgenommen wird."""
+
+    #: Zeigt unten mittig eine Pille mit Pegelbalken (Aufnahme) bzw. einer
+    #: Welle (Verarbeitung). Nur in der Menüleisten-App.
+    enabled: bool = True
+
+
+@dataclass
 class FeedbackConfig:
     sound: bool = True
     start_sound: str = "/System/Library/Sounds/Tink.aiff"
@@ -200,6 +209,7 @@ class Config:
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
+    overlay: OverlayConfig = field(default_factory=OverlayConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -320,6 +330,8 @@ def validate(cfg: Config) -> None:
     if not isinstance(extras, list) or not all(isinstance(w, str) for w in extras):
         raise ConfigError("cleanup.extra_fillers muss eine Liste von Wörtern sein")
     _validate_streaming(cfg.streaming)
+    if not isinstance(cfg.overlay.enabled, bool):
+        raise ConfigError("overlay.enabled muss true oder false sein")
     threshold = cfg.pipeline.silence_threshold
     if isinstance(threshold, bool) or not isinstance(threshold, int | float) or threshold < 0:
         raise ConfigError("pipeline.silence_threshold muss eine Zahl >= 0 sein")

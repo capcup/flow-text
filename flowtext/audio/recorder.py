@@ -80,12 +80,23 @@ class AudioRecorder:
         self._started_at: float | None = None
         self._max_frames = int(cfg.sample_rate * cfg.max_seconds)
         self._overflows = 0
+        self._level = 0.0
 
     # ------------------------------------------------------------------ API
 
     @property
     def is_recording(self) -> bool:
         return self._stream is not None
+
+    @property
+    def level(self) -> float:
+        """RMS-Pegel des zuletzt gelieferten Puffers (0 bis ~1) — für die Aufnahme-Anzeige.
+
+        Ein einzelner Zahlenwert, vom Callback geschrieben und von anderen
+        Threads gelesen; ein float-Zugriff ist atomar, ein Lock wäre im
+        Callback verboten.
+        """
+        return self._level
 
     @property
     def elapsed(self) -> float:
@@ -126,6 +137,7 @@ class AudioRecorder:
         """
         stream, self._stream = self._stream, None
         self._started_at = None
+        self._level = 0.0
 
         if stream is not None:
             try:
@@ -167,6 +179,7 @@ class AudioRecorder:
         """Bricht ab und verwirft alles (z. B. beim Herunterfahren)."""
         stream, self._stream = self._stream, None
         self._started_at = None
+        self._level = 0.0
         if stream is not None:
             try:
                 stream.stop()
@@ -204,7 +217,9 @@ class AudioRecorder:
         """Realtime-Thread: kein Lock, keine I/O, kein Logging im Normalfall."""
         if status:
             self._overflows += 1  # nur zählen; geloggt wird in stop()
-        self._chunks.put_nowait(np.asarray(indata).copy())
+        block = np.asarray(indata)
+        self._level = float(np.sqrt(np.mean(np.square(block))))
+        self._chunks.put_nowait(block.copy())
 
     def _collect(self) -> None:
         """Holt alle Puffer aus der Queue. Aufrufer hält ``_collect_lock``."""

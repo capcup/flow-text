@@ -55,6 +55,7 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | B1 | high | Bug | done (2026-11-10) | Clipboard restore wipes images/files; overwrites user copies |
 | B2 | high | Bug | open | Config values not type-checked (`"false"` is truthy) |
 | R1 | high | Robustness & privacy | open | Transcript text written to the log file at INFO |
+| U5 | med  | UX | done (2026-11-10) | Recording indicator: pill with level bars at the screen bottom |
 | D1 | high | Docs/tooling/git | done (2026-11-10, 2905d8e) | Commit the pending uncommitted work on `main` |
 | P3 | med  | Performance | open | Shortened encoder window (encoder = 89 % of latency) with guards |
 | P4 | med  | Performance | partial (2026-11-10) | Transcribe long dictations incrementally while recording. Done as opt-in live insertion per pause (`[streaming]`); the variant that transcribes in the background but inserts only at the end is not built |
@@ -519,6 +520,28 @@ word-level Levenshtein distance divided by the number of reference words.
 - When a password field, 1Password or Terminal's "Secure Keyboard Entry" is
   active, the event tap gets no keys. Poll `IsSecureEventInputEnabled()`
   (Carbon) in the menu bar tick and show it.
+
+**U5 — Recording indicator** · med (added and implemented 2026-11-10)
+- A sound and a small menu bar icon are easy to miss, and with `early_start`
+  the sound comes on release. `overlay.py` shows a pill at the bottom centre
+  of the screen with the mouse: five bars following the microphone level
+  (recording) or a grey wave (processing). Design 1 of six mock-ups, chosen
+  because it also shows whether the right microphone hears you.
+- *How:* `AudioRecorder.level` (RMS of the last block, written by the
+  callback, no lock), `indicator.py` (pure maths, tested), `overlay.py`
+  (`NSPanel`, non-activating, click-through, all Spaces, above full-screen
+  apps, 30 fps `NSTimer` in common run-loop modes only while visible). The
+  menu bar app shows/hides it from the state observer via
+  `AppHelper.callAfter`, with the 200 ms tick as fallback; a failure turns it
+  off for the session without touching dictation. `[overlay] enabled`
+  (default on) and a switch in Settings.
+- *Checked in a real session:* the frontmost app and key window are
+  unchanged after `show`, the animation runs (10 distinct frames in 0.5 s),
+  it lands bottom centre on the screen with the mouse, `hide` stops the timer,
+  the PNGs look right.
+- *Not checked:* in the running app with a real microphone; over a full-screen
+  app; with several Spaces; the level scale (`REFERENCE_RMS = 0.1`) against
+  real speech, which may need tuning.
 
 **U4 — Menu bar items** · low
 - *Implemented 2026-11-10:* "Open Configuration…" is now **Settings…**, a

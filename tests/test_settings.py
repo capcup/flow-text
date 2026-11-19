@@ -107,7 +107,13 @@ class TestPreferences:
         assert preferences.parse_terms("") == []
 
     def test_every_option_has_a_label_and_hint(self) -> None:
-        assert [o.key for o in OPTIONS] == ["enabled", "remove_fillers", "sound", "vocabulary"]
+        assert [(o.section, o.key) for o in OPTIONS] == [
+            ("streaming", "enabled"),
+            ("cleanup", "remove_fillers"),
+            ("feedback", "sound"),
+            ("overlay", "enabled"),
+            ("pipeline", "vocabulary"),
+        ]
         assert all(o.label and o.hint for o in OPTIONS)
 
 
@@ -298,6 +304,10 @@ def window_app():
     return FakeApp()
 
 
+def _index(section: str, key: str) -> int:
+    return [(o.section, o.key) for o in OPTIONS].index((section, key))
+
+
 class TestWindow:
     def _window(self, app: Any, opened: list[int] | None = None):
         from flowtext.settings_window import SettingsWindow
@@ -310,26 +320,33 @@ class TestWindow:
         window_app.cfg.pipeline.vocabulary = ["A", "B"]
         window = self._window(window_app)
         window.render_png(Path("/dev/null"))  # baut und füllt das Fenster
-        assert [int(window._controls[i].state()) for i in (0, 1, 2)] == [0, 1, 1]
-        assert str(window._controls[3].stringValue()) == "A, B"
+        states = [int(window._controls[i].state()) for i in range(4)]
+        assert states == [0, 1, 1, 1]  # Live aus, Füllwörter an, Töne an, Anzeige an
+        assert str(window._controls[_index("pipeline", "vocabulary")].stringValue()) == "A, B"
 
     def test_clicks_change_the_settings(self, window_app) -> None:
         window = self._window(window_app)
         window.render_png(Path("/dev/null"))
-        window._controls[0].performClick_(None)
-        window._controls[1].performClick_(None)
-        window._controls[2].performClick_(None)
+        for section, key in (
+            ("streaming", "enabled"),
+            ("cleanup", "remove_fillers"),
+            ("feedback", "sound"),
+            ("overlay", "enabled"),
+        ):
+            window._controls[_index(section, key)].performClick_(None)
         assert window_app.cfg.streaming.enabled is True
         assert window_app.cfg.cleanup.remove_fillers is True
         assert window_app.cfg.feedback.sound is False
+        assert window_app.cfg.overlay.enabled is False
 
     def test_vocabulary_is_tidied_and_saved_on_commit_and_on_close(self, window_app) -> None:
         window = self._window(window_app)
         window.render_png(Path("/dev/null"))
-        window._controls[3].setStringValue_("  Whisper, ,Ollama,Whisper\nMLX ")
+        field = window._controls[_index("pipeline", "vocabulary")]
+        field.setStringValue_("  Whisper, ,Ollama,Whisper\nMLX ")
         window.commit_text_fields()
         assert window_app.cfg.pipeline.vocabulary == ["Whisper", "Ollama", "MLX"]
-        assert str(window._controls[3].stringValue()) == "Whisper, Ollama, MLX"
+        assert str(field.stringValue()) == "Whisper, Ollama, MLX"
         n = len(window_app.calls)
         window.commit_text_fields()
         assert len(window_app.calls) == n  # unverändert: nicht noch einmal speichern

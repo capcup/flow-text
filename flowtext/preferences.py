@@ -65,6 +65,13 @@ OPTIONS: tuple[Option, ...] = (
         "Short sounds when recording starts, stops and finishes.",
     ),
     Option(
+        "overlay",
+        "enabled",
+        bool,
+        "Show recording indicator",
+        "A small bar at the screen bottom shows that FlowText is listening and how loud you are.",
+    ),
+    Option(
         "pipeline",
         "vocabulary",
         list,

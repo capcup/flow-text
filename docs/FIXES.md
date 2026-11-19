@@ -123,7 +123,10 @@ not removable bloat. `dist/` is correctly gitignored.
 - **U4 (partial)** — the menu's "Open Configuration…" became a **Settings…**
   window with live-applied switches, stored in `preferences.json`.
 
-Local state after these: `ruff`, `mypy --strict` clean, 439 tests passing.
+- **U5** — a recording indicator (pill with level bars) at the bottom of the
+  screen, on by default, switchable in Settings.
+
+Local state after these: `ruff`, `mypy --strict` clean, 469 tests passing.
 P1, P4, Q1 and Q2 were additionally run against the real model on
 synthesised clips with no ffmpeg on `PATH` (numbers in `IMPROVEMENTS.md`).
 Nothing has been checked against real microphone dictations, and B1, R2 and

@@ -55,6 +55,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Cocoa verlangt Selektornamen wie ``windowWillClose_`` und ``optionToggled_``.
 "flowtext/settings_window.py" = ["N802", "N803"]
+"flowtext/overlay.py" = ["N802", "N803"]
 
 # ---------------------------------------------------------------- mypy
 
@@ -77,6 +78,8 @@ module = [
     "pyperclip",
     "rumps",
     "AppKit",
+    "Foundation",
+    "PyObjCTools.*",
     "objc",
 ]
 ignore_missing_imports = true

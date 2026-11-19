@@ -83,6 +83,30 @@ TICK_SECONDS = 0.2
 MIN_RUNLOOP_SECONDS = 1.0
 
 
+#: Zustand → Modus der Aufnahme-Anzeige; in allen anderen ist sie versteckt.
+OVERLAY_MODES: dict[State, str] = {
+    State.RECORDING: "recording",
+    State.PROCESSING: "processing",
+}
+
+
+def create_overlay(app: FlowTextApp) -> Any:
+    """Baut die Aufnahme-Anzeige (AppKit). Importiert erst hier, damit ein Fehler lokal bleibt."""
+    from .overlay import RecordingOverlay
+
+    return RecordingOverlay(lambda: float(getattr(app.recorder, "level", 0.0)))
+
+
+def _on_main(func: Any) -> None:
+    """Führt ``func`` im Hauptthread aus (Cocoa-Runloop). Ohne Runloop passiert nichts."""
+    try:
+        from PyObjCTools import AppHelper
+
+        AppHelper.callAfter(func)
+    except Exception as exc:  # noqa: BLE001 — dann übernimmt der Timer-Tick
+        log.debug("Hauptthread-Aufruf nicht möglich: %s", exc)
+
+
 def available() -> bool:
     """Ist ``rumps`` installiert?"""
     if "rumps" in sys.modules:
@@ -153,6 +177,8 @@ class MenubarApp:
         self._started = False
         self._notified: Notice | None = None
         self._settings: Any = None
+        self._overlay: Any = None
+        self._overlay_failed = False
         # Läuft im Controller-Thread: NUR schreiben, kein Cocoa-Zugriff.
         app.state.subscribe(self._remember_state)
 
@@ -219,8 +245,28 @@ class MenubarApp:
     # ----------------------------------------------------------- Callbacks
 
     def _remember_state(self, previous: State, current: State) -> None:
-        """Observer aus dem Controller-Thread — hier nur merken."""
+        """Observer aus dem Controller-Thread — merken, Cocoa-Arbeit an den Hauptthread geben."""
         self._state = current
+        # Sofort statt erst beim nächsten Tick (bis zu 200 ms später): die
+        # Anzeige soll mit dem Startton erscheinen.
+        _on_main(self._sync_overlay)
+
+    def _sync_overlay(self) -> None:
+        """Zeigt oder versteckt die Aufnahme-Anzeige passend zum Zustand. Hauptthread."""
+        mode = OVERLAY_MODES.get(self._state)
+        if mode is None or not self.cfg.overlay.enabled or self.app.paused:
+            if self._overlay is not None:
+                self._overlay.hide()
+            return
+        if self._overlay_failed:
+            return
+        try:
+            if self._overlay is None:
+                self._overlay = create_overlay(self.app)
+            self._overlay.show(mode)
+        except Exception:
+            log.exception("Recording indicator could not be shown — turned off for this session.")
+            self._overlay_failed = True
 
     def _tick(self, _timer: Any) -> None:
         """Läuft im Hauptthread; nur hier wird die Oberfläche angefasst."""
@@ -247,6 +293,7 @@ class MenubarApp:
             if self._permissions_ok:
                 log.info("Permissions granted.")
 
+        self._sync_overlay()  # Rückfall, falls ein Hauptthread-Aufruf verloren ging
         paused = self.app.paused
         notice = active_notice(self.app.notice)
         if notice is not None and notice.is_error and notice is not self._notified:

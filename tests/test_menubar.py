@@ -584,3 +584,73 @@ class TestSettingsMenu:
             menu._open_settings(None)
         assert opened == [None]
         assert "Settings window could not be opened" in caplog.text
+
+
+# ------------------------------------------------------------- Aufnahme-Anzeige
+
+
+class TestMenubarOverlay:
+    def _transition(self, menu, target: State) -> None:
+        menu.app.state.transition(target)
+        menu._sync_overlay()
+
+    def test_follows_the_state(self, menu) -> None:
+        self._transition(menu, State.RECORDING)
+        overlay = menu._overlay
+        self._transition(menu, State.PROCESSING)
+        self._transition(menu, State.IDLE)
+        assert overlay.calls == ["show:recording", "show:processing", "hide"]
+
+    def test_stays_away_while_idle(self, menu) -> None:
+        menu._sync_overlay()
+        assert menu._overlay is None  # nie gebaut, solange nichts aufgenommen wird
+
+    def test_error_state_hides_it(self, menu) -> None:
+        self._transition(menu, State.RECORDING)
+        overlay = menu._overlay
+        self._transition(menu, State.ERROR)
+        assert overlay.calls[-1] == "hide"
+
+    def test_disabled_in_the_config_means_never(self, menu) -> None:
+        menu.cfg.overlay.enabled = False
+        self._transition(menu, State.RECORDING)
+        assert menu._overlay is None
+
+    def test_switching_it_off_hides_a_visible_one(self, menu) -> None:
+        self._transition(menu, State.RECORDING)
+        menu.cfg.overlay.enabled = False
+        menu._sync_overlay()
+        assert menu._overlay.calls[-1] == "hide"
+
+    def test_repeated_syncs_are_harmless(self, menu) -> None:
+        self._transition(menu, State.RECORDING)
+        menu._sync_overlay()
+        menu._sync_overlay()
+        assert menu._overlay.visible
+
+    def test_a_broken_overlay_never_disturbs_dictation(self, menu, monkeypatch, caplog) -> None:
+        def boom(app: Any) -> Any:
+            raise RuntimeError("kein Bildschirm")
+
+        monkeypatch.setattr(menubar, "create_overlay", boom)
+        with caplog.at_level("ERROR"):
+            self._transition(menu, State.RECORDING)
+            self._transition(menu, State.PROCESSING)
+            self._transition(menu, State.IDLE)
+        assert caplog.text.count("could not be shown") == 1  # nur einmal melden
+        assert menu._overlay_failed
+
+    def test_state_change_asks_the_main_thread(self, menu, monkeypatch) -> None:
+        calls: list[Any] = []
+        monkeypatch.setattr(menubar, "_on_main", calls.append)
+        menu.app.state.transition(State.RECORDING)  # Observer läuft im Controller-Thread
+        assert calls == [menu._sync_overlay]
+
+    def test_the_timer_tick_is_a_fallback(self, menu) -> None:
+        _run_ui(menu)
+        menu.app.state.transition(State.RECORDING)
+        FakeTimer.instances[-1].tick()
+        assert menu._overlay.calls == ["show:recording"]
+
+    def test_every_active_state_has_a_mode(self) -> None:
+        assert set(menubar.OVERLAY_MODES) == {State.RECORDING, State.PROCESSING}

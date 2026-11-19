@@ -15,7 +15,7 @@ Unlike cloud-based speech-to-text tools, **FlowText runs 100% offline on your Ma
 * ⌨️ **Double-Tap Hotkey**: Simply double-tap the **`⌘` Command key** (or custom shortcuts) anywhere on macOS to start and stop dictation.
 * 🤖 **Optional Power-User LLM Refinement**: Optional grammar correction and formatting via local `Ollama` models (disabled by default, no setup required).
 * 📋 **Universal Text Injection**: Automatically pastes transcribed text into whatever text field or application you are currently typing in (`Cmd+V`).
-* 🖥️ **Menu Bar Integration**: Displays live status (Ready 🎙, Recording 🔴, Processing ⏳, Paused ⏸) in your macOS menu bar, names the reason when something goes wrong, and has a **Settings…** window.
+* 🖥️ **Menu Bar Integration**: Displays live status (Ready 🎙, Recording 🔴, Processing ⏳, Paused ⏸) in your macOS menu bar, names the reason when something goes wrong, and has a **Settings…** window. While you record, a small bar at the bottom of the screen shows that FlowText is listening and how loud you are.
 * 🧹 **Cleaner Text**: Optionally removes filler words ("äh", "ähm") and stutters, applies your own fixed corrections, and gives Whisper a vocabulary of names and terms to spell correctly — all without Ollama.
 * 🤫 **No Invented Text**: Silence and background noise are not transcribed, so Whisper no longer answers them with "Vielen Dank." (see `silence_threshold`).
 * ✂️ **Live Insertion (optional)**: Text can appear after each pause while you are still speaking, so long dictations don't end with a long wait.
@@ -125,9 +125,11 @@ The icon shows you what FlowText is doing at a glance:
 | 🔒 | Permissions missing — use the menu to grant them |
 | ⚠️ | Error — the menu's status line names the reason for a few seconds; details are in the log |
 
+While recording, a small dark pill appears at the bottom of the screen (on the screen where your mouse is): five bars that follow the loudness of your voice, so you see at once whether the right microphone is listening. While FlowText transcribes, the bars turn grey and run as a slow wave; then the pill disappears. It never takes the keyboard focus and clicks pass through it. Turn it off with `[overlay] enabled = false` or in **Settings…**.
+
 Click the icon for: pause/resume, **Settings…**, the permission shortcuts, the log file, quit.
 
-**Settings…** opens a small window with the switches you change day to day: *Live insertion*, *Remove filler words*, *Play sounds* and the *Vocabulary*. A change applies immediately, without a restart, and is remembered in `~/Library/Application Support/FlowText/preferences.json`. Values you changed there win over `config.toml` (delete the file to go back to `config.toml`); everything else (hotkey, models, thresholds) stays in `config.toml`, which the window's **Open config.toml…** button opens.
+**Settings…** opens a small window with the switches you change day to day: *Live insertion*, *Remove filler words*, *Play sounds*, *Show recording indicator* and the *Vocabulary*. A change applies immediately, without a restart, and is remembered in `~/Library/Application Support/FlowText/preferences.json`. Values you changed there win over `config.toml` (delete the file to go back to `config.toml`); everything else (hotkey, models, thresholds) stays in `config.toml`, which the window's **Open config.toml…** button opens.
 
 ---
 
@@ -200,7 +202,7 @@ If the app doesn't launch, the reason is in `~/Library/Logs/FlowText/launcher.lo
 
 FlowText can be customized by editing the `config.toml` file in the project folder. You can open it in any text editor, or use **Open config.toml…** in the menu bar's **Settings…** window.
 
-> The four switches in **Settings…** (live insertion, filler words, sounds, vocabulary) are remembered in `~/Library/Application Support/FlowText/preferences.json` and win over `config.toml`. Delete that file to go back to the values below. Starting with `--config <file>` ignores it.
+> The switches in **Settings…** (live insertion, filler words, sounds, recording indicator, vocabulary) are remembered in `~/Library/Application Support/FlowText/preferences.json` and win over `config.toml`. Delete that file to go back to the values below. Starting with `--config <file>` ignores it.
 
 ```toml
 [hotkey]
@@ -230,6 +232,9 @@ enabled = false           # true = insert text after each pause WHILE you speak
 pause_seconds = 0.7       # how long it must be quiet before a part ends
 min_segment_seconds = 2.0 # shorter parts are not split off
 max_segment_seconds = 20.0 # longer parts are split at the quietest spot (max. 25)
+
+[overlay]
+enabled = true            # small recording indicator at the bottom of the screen (menu bar app only)
 
 [cleanup]
 remove_fillers = false    # true = strip "äh", "ähm", "hm" and stutters ("ich ich"). Rule-based, no Ollama needed.

@@ -3,7 +3,7 @@
 # Persönliche Overrides gehören in config.local.toml (nicht im Git).
 #
 # Die Schalter im Fenster "Settings…" der Menüleiste (Live-Ausgabe, Füllwörter,
-# Töne, Vokabeln) werden in ~/Library/Application Support/FlowText/
+# Töne, Aufnahme-Anzeige, Vokabeln) werden in ~/Library/Application Support/FlowText/
 # preferences.json gespeichert und gewinnen gegen die Werte hier. Datei löschen
 # = es gilt wieder diese config.toml.
 # Alle Werte sind optional; fehlende Schlüssel nutzen die Defaults.
@@ -107,6 +107,12 @@ enabled = false
 pause_seconds = 0.7          # so lange muss es still sein, bis ein Abschnitt endet
 min_segment_seconds = 2.0    # kürzere Abschnitte werden nicht abgetrennt
 max_segment_seconds = 20.0   # längere werden an der leisesten Stelle getrennt (max. 25)
+
+[overlay]
+# Kleine Anzeige unten mittig auf dem Bildschirm, solange aufgenommen wird:
+# fünf Balken, die der Lautstärke folgen (graue Welle beim Verarbeiten). Sie
+# nimmt nie den Fokus und lässt Klicks durch. Nur in der Menüleisten-App.
+enabled = true
 
 [feedback]
 sound = true
