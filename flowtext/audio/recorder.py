@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -70,6 +71,11 @@ class AudioRecorder:
         self._cfg = cfg
         self._make_stream = stream_factory or _default_stream_factory
         self._chunks: queue.Queue[AudioArray] = queue.Queue()
+        #: Bereits aus der Queue geholte Puffer. Der Callback fasst das nie an;
+        #: das Lock schützt nur Nicht-Realtime-Threads untereinander.
+        self._collected: list[AudioArray] = []
+        self._read_upto = 0
+        self._collect_lock = threading.Lock()
         self._stream: Any = None
         self._started_at: float | None = None
         self._max_frames = int(cfg.sample_rate * cfg.max_seconds)
@@ -94,7 +100,7 @@ class AudioRecorder:
         if self._stream is not None:
             raise AudioError("Aufnahme läuft bereits")
 
-        self._drain()
+        self._reset()
         self._overflows = 0
         try:
             stream = self._make_stream(
@@ -139,7 +145,9 @@ class AudioRecorder:
                 self._overflows,
             )
 
-        chunks = self._drain()
+        with self._collect_lock:
+            self._collect()
+            chunks = list(self._collected)
         if not chunks:
             log.warning("Keine Audiodaten erfasst — ist die Mikrofonberechtigung erteilt?")
             return None
@@ -165,7 +173,23 @@ class AudioRecorder:
                 stream.close()
             except Exception:  # noqa: BLE001
                 pass
-        self._drain()
+        self._reset()
+
+    def take_new(self) -> AudioArray | None:
+        """Die seit dem letzten Aufruf aufgenommenen Samples — auch während der Aufnahme.
+
+        Für die abschnittsweise Ausgabe. Zerstört nichts: ``stop()`` liefert
+        weiterhin die komplette Aufnahme. Nach ``stop()`` holt ein letzter
+        Aufruf den noch ungelesenen Rest.
+        """
+        with self._collect_lock:
+            self._collect()
+            new = self._collected[self._read_upto :]
+            self._read_upto = len(self._collected)
+        if not new:
+            return None
+        merged: AudioArray = np.concatenate(new, axis=0).reshape(-1)
+        return merged
 
     def save(self, recording: Recording, path: Path) -> Path:
         import soundfile as sf
@@ -182,10 +206,17 @@ class AudioRecorder:
             self._overflows += 1  # nur zählen; geloggt wird in stop()
         self._chunks.put_nowait(np.asarray(indata).copy())
 
-    def _drain(self) -> list[AudioArray]:
-        out: list[AudioArray] = []
+    def _collect(self) -> None:
+        """Holt alle Puffer aus der Queue. Aufrufer hält ``_collect_lock``."""
         while True:
             try:
-                out.append(self._chunks.get_nowait())
+                self._collected.append(self._chunks.get_nowait())
             except queue.Empty:
-                return out
+                return
+
+    def _reset(self) -> None:
+        """Verwirft Queue und Sammlung (neue Aufnahme oder Abbruch)."""
+        with self._collect_lock:
+            self._collect()
+            self._collected = []
+            self._read_upto = 0

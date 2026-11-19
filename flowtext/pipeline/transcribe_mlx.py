@@ -32,6 +32,9 @@ log = logging.getLogger(__name__)
 #: Whisper erwartet 16 kHz Mono als float32.
 _WHISPER_RATE = 16_000
 
+#: So viel vom zuvor erkannten Text geht als Vortext mit (~70 Tokens).
+_CONTEXT_CHARS = 200
+
 #: Whisper nutzt höchstens ~224 Tokens Vortext und schneidet VORN ab. Als
 #: grobe Faustregel für Deutsch: 3 Zeichen pro Token.
 _PROMPT_CHAR_BUDGET = 600
@@ -92,10 +95,10 @@ class MlxTranscriber:
         self._ready = True
         log.info("Whisper model ready (%.1fs).", time.perf_counter() - started)
 
-    def transcribe(self, recording: Recording) -> TranscriptionResult:
+    def transcribe(self, recording: Recording, *, context: str = "") -> TranscriptionResult:
         started = time.perf_counter()
         try:
-            result = self._transcribe(self._prepare(recording))
+            result = self._transcribe(self._prepare(recording), context)
         except Exception as exc:
             raise TranscriptionError(f"Transkription fehlgeschlagen: {exc}") from exc
 
@@ -108,16 +111,19 @@ class MlxTranscriber:
 
     # -------------------------------------------------------------- intern
 
-    def _transcribe(self, samples: AudioArray) -> dict[str, Any]:
+    def _transcribe(self, samples: AudioArray, context: str = "") -> dict[str, Any]:
         import mlx_whisper
 
         kwargs: dict[str, Any] = {"path_or_hf_repo": self._model}
         if self._language:
             kwargs["language"] = self._language
-        if self._initial_prompt:
-            # Wirkt als Hinweis, nicht als Garantie. Bei langen Diktaten
-            # verdrängt der bereits erkannte Text den Vortext nach und nach.
-            kwargs["initial_prompt"] = self._initial_prompt
+        # Vokabeln zuerst, dann der zuvor erkannte Text: Whisper kürzt den
+        # Vortext von vorn, das Neueste bleibt also erhalten. Ein Hinweis,
+        # keine Garantie; bei langen Diktaten verdrängt der erkannte Text
+        # die Vokabeln nach und nach.
+        prompt = " ".join(p for p in (self._initial_prompt, context.strip()[-_CONTEXT_CHARS:]) if p)
+        if prompt:
+            kwargs["initial_prompt"] = prompt
         result: dict[str, Any] = mlx_whisper.transcribe(samples, **kwargs)
         return result
 

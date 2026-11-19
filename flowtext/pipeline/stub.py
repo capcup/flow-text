@@ -19,7 +19,7 @@ class StubTranscriber:
     def warmup(self) -> None:
         log.info("Transkription: Stub-Modus — es wird nichts erkannt.")
 
-    def transcribe(self, recording: Recording) -> TranscriptionResult:
+    def transcribe(self, recording: Recording, *, context: str = "") -> TranscriptionResult:
         log.info(
             "⚡ Audio bereit für Inferenz: %.2fs bei %d Hz. "
             'Stub-Modus — für echte Transkription pipeline.transcriber = "mlx" setzen.',

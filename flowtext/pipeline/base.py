@@ -31,6 +31,9 @@ class TranscriptionResult:
 class Transcriber(Protocol):
     """Aufnahme (Samples im Speicher) → Rohtext.
 
+    ``context`` ist der unmittelbar vorher erkannte Text (abschnittsweise
+    Ausgabe); er hilft bei Groß-/Kleinschreibung und Satzfortsetzung.
+
     Die Aufnahme wird direkt übergeben, nicht als Datei: kein Umweg über die
     Festplatte und kein externes ``ffmpeg`` zum Wiedereinlesen.
 
@@ -38,7 +41,7 @@ class Transcriber(Protocol):
     Aufräumen. :class:`Pipeline` ruft beide auf, wenn sie existieren.
     """
 
-    def transcribe(self, recording: Recording) -> TranscriptionResult: ...
+    def transcribe(self, recording: Recording, *, context: str = "") -> TranscriptionResult: ...
 
 
 @runtime_checkable
@@ -111,12 +114,21 @@ class Pipeline:
             except Exception:
                 log.debug("Shutdown einer Pipeline-Stufe fehlgeschlagen.", exc_info=True)
 
-    def run(self, recording: Recording) -> str:
+    def run(self, recording: Recording, *, context: str = "", prefix: str = "") -> str:
+        """Verarbeitet eine Aufnahme (oder einen Abschnitt davon) bis zur Ausgabe.
+
+        ``context`` ist der zuvor erkannte Text, ``prefix`` wird dem Ergebnis
+        nur beim Einfügen vorangestellt (Leerzeichen zwischen Abschnitten).
+        Zurückgegeben wird der Text ohne ``prefix``.
+        """
         started = time.perf_counter()
         if self.guard is not None and self.guard.is_silent(recording):
             return ""
 
-        result = self.transcriber.transcribe(recording)
+        if context:
+            result = self.transcriber.transcribe(recording, context=context)
+        else:
+            result = self.transcriber.transcribe(recording)
         text = result.text.strip()
         if text and self.guard is not None and self.guard.is_phantom(text, recording):
             return ""
@@ -147,7 +159,7 @@ class Pipeline:
                 log.exception("Refinement failed — using raw transcript.")
 
         if self.injector is not None:
-            self.injector.inject(text)
+            self.injector.inject(prefix + text)
 
         log.info("Finished in %.2fs.", time.perf_counter() - started)
         return text

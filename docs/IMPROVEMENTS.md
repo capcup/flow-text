@@ -57,7 +57,7 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | R1 | high | Robustness & privacy | open | Transcript text written to the log file at INFO |
 | D1 | high | Docs/tooling/git | done (2026-11-10, 2905d8e) | Commit the pending uncommitted work on `main` |
 | P3 | med  | Performance | open | Shortened encoder window (encoder = 89 % of latency) with guards |
-| P4 | med  | Performance | open | Transcribe long dictations incrementally while recording |
+| P4 | med  | Performance | partial (2026-11-10) | Transcribe long dictations incrementally while recording. Done as opt-in live insertion per pause (`[streaming]`); the variant that transcribes in the background but inserts only at the end is not built |
 | P5 | med  | Performance | open | Trim leading/trailing silence before transcription (helps Q1 too) |
 | P6 | med  | Performance | open | Ollama: `keep_alive`, reuse client |
 | P7 | med  | Performance | open | Benchmark Parakeet TDT v3 (`parakeet-mlx`) as an alternative transcriber |
@@ -256,6 +256,27 @@ word-level Levenshtein distance divided by the number of reference words.
   left. Pass the previous chunk's text as the prompt for continuity.
 - *Expected gain:* final latency roughly constant (~1 s) instead of growing
   ~0.9 s per 30 s.
+
+- *Implemented 2026-11-10:* `[streaming] enabled` (default off).
+  `audio/segmenter.py` cuts at pauses (0.7 s, min 2 s, max 20 s at the
+  quietest spot), `AudioRecorder.take_new()` hands out samples during the
+  recording, the controller loop polls it, a `stream-worker` thread runs each
+  segment through the normal pipeline in order. The previous text goes to
+  Whisper as prompt context, segments after the first are pasted with a
+  leading space. The final job also carries the whole recording for
+  `delete_after_use = false` and `bench.py`.
+- *Measured (real model, TTS, 21.9 s, 4 sentences, 1 s pauses):* identical
+  text to the whole-recording run; wait after stop 1,030 ms vs. 1,378 ms.
+  The gain grows with length (whole-clip time is ~0.9 s per 30 s on top of
+  the base cost), but for dictations under ~10 s there is none.
+- *Limits, by design:* inserted text cannot be corrected later (self-
+  corrections across a pause stay); refiner and cleaner see one segment at a
+  time; after a pause the cleaner capitalises the first word of a segment;
+  pauses are detected against `silence_threshold`, so a noise floor above it
+  means no pauses and only the 20 s forced cut; a paste while the user is
+  taking the double-tap to stop could interfere (not observed, not tested by
+  hand).
+- *Not checked:* real microphone speech with natural pauses, the running app.
 
 **P5 — Trim silence** · med
 - *Fix:* cut leading/trailing frames below the RMS threshold (keep ~200 ms of

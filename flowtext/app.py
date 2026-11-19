@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .audio.recorder import AudioError, AudioRecorder, Recording
+from .audio.recorder import AudioArray, AudioError, AudioRecorder, Recording
+from .audio.segmenter import Segmenter
 from .config import Config, temp_dir
 from .feedback import Feedback
 from .hotkey.detectors import Signal
@@ -40,6 +41,12 @@ _STALE_TEMP_AGE_SECONDS = 24 * 3600
 #: verloren ging), wird sie verworfen. Deutlich über ``max_tap_duration``.
 _TENTATIVE_TIMEOUT_SECONDS = 2.0
 
+#: Pausenpegel der Abschnittserkennung, wenn ``pipeline.silence_threshold = 0``.
+_DEFAULT_PAUSE_LEVEL = 0.005
+
+#: So viel vom bisherigen Text geht als Kontext an den nächsten Abschnitt.
+_CONTEXT_CHARS = 200
+
 
 @dataclass(frozen=True)
 class Notice:
@@ -55,6 +62,30 @@ class Notice:
     at: float = field(default_factory=time.monotonic)
 
 
+@dataclass
+class StreamRun:
+    """Zustand eines Diktats im Abschnittsmodus.
+
+    Wird beim Start der Aufnahme angelegt und danach nur vom Stream-Worker
+    verändert, der die Abschnitte der Reihe nach abarbeitet.
+    """
+
+    #: Bisher eingefügter Text.
+    text: str = ""
+    #: Erster Fehler eines Abschnitts, falls einer scheiterte.
+    failed: str | None = None
+
+
+@dataclass(frozen=True)
+class SegmentJob:
+    run: StreamRun
+    #: ``None`` = nichts mehr zu transkribieren (nur der Abschluss).
+    recording: Recording | None
+    final: bool = False
+    #: Die komplette Aufnahme, nur beim letzten Abschnitt (für die Fehlersuche).
+    full: Recording | None = None
+
+
 class FlowTextApp:
     def __init__(
         self,
@@ -68,6 +99,8 @@ class FlowTextApp:
         self.state = StateMachine()
         self.events: queue.Queue[str] = queue.Queue(maxsize=8)
         self.jobs: queue.Queue[Recording] = queue.Queue(maxsize=4)
+        #: Abschnitte der laufenden Aufnahme (nur bei ``streaming.enabled``).
+        self.segments: queue.Queue[SegmentJob] = queue.Queue(maxsize=8)
 
         self.recorder = recorder or AudioRecorder(cfg.audio)
         self.hotkey = hotkey or HotkeyService(cfg.hotkey, self.events)
@@ -79,6 +112,9 @@ class FlowTextApp:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._paused = False
+        #: Nur im Controller-Thread: Abschnittserkennung des laufenden Diktats.
+        self._segmenter: Segmenter | None = None
+        self._stream_run: StreamRun | None = None
         #: Letzte Meldung für die Oberfläche; wird aus Controller- und
         #: Worker-Thread gesetzt, vom Hauptthread nur gelesen.
         self.notice: Notice | None = None
@@ -113,6 +149,10 @@ class FlowTextApp:
             threading.Thread(target=self._controller_loop, name="controller", daemon=True),
             threading.Thread(target=self._worker_loop, name="pipeline-worker", daemon=True),
         ]
+        if self.cfg.streaming.enabled:
+            self._threads.append(
+                threading.Thread(target=self._stream_loop, name="stream-worker", daemon=True)
+            )
         for thread in self._threads:
             thread.start()
         self.hotkey.start()
@@ -168,6 +208,7 @@ class FlowTextApp:
             self._discard_tentative("Pause")
         if value and self.state.current is State.RECORDING:
             self.recorder.abort()
+            self._drop_streaming()
             self.state.transition(State.IDLE)
             log.info("Recording discarded due to pause.")
         log.info("FlowText %s.", "paused" if value else "active again")
@@ -194,6 +235,7 @@ class FlowTextApp:
             try:
                 event = self.events.get(timeout=0.2)
             except queue.Empty:
+                self._poll_streaming()
                 self._check_max_duration()
                 self._check_tentative_timeout()
                 continue
@@ -267,6 +309,7 @@ class FlowTextApp:
         if not already_running and not self._start_recorder():
             return
         self.notice = None  # neue Aufnahme: alte Meldung ist erledigt
+        self._start_streaming()
         self.state.transition(State.RECORDING)
         log.info("🎤 Recording active — trigger again to stop.")
 
@@ -285,6 +328,8 @@ class FlowTextApp:
 
     def _finish_recording(self, *, reason: str = "Hotkey") -> None:
         recording = self.recorder.stop()
+        run, segmenter = self._stream_run, self._segmenter
+        self._drop_streaming()
         if recording is None:
             log.info("Recording discarded (%s).", reason)
             self.state.transition(State.IDLE)
@@ -301,6 +346,10 @@ class FlowTextApp:
         if recording.peak < 0.001:
             log.warning("Audio signal is practically silent — wrong input device?")
 
+        if run is not None and segmenter is not None:
+            self._finish_streaming(run, segmenter, recording)
+            return
+
         # Die Samples gehen direkt aus dem Speicher an die Pipeline — keine
         # Datei, kein ffmpeg.
         try:
@@ -308,6 +357,102 @@ class FlowTextApp:
         except queue.Full:
             log.error("Verarbeitungswarteschlange voll — Aufnahme verworfen.")
             self._to_error("Still busy — recording discarded")
+
+    # ------------------------------------------------ abschnittsweise Ausgabe
+
+    def _start_streaming(self) -> None:
+        cfg = self.cfg.streaming
+        if not cfg.enabled:
+            return
+        self._segmenter = Segmenter(
+            self.cfg.audio.sample_rate,
+            level=self.cfg.pipeline.silence_threshold or _DEFAULT_PAUSE_LEVEL,
+            pause_seconds=cfg.pause_seconds,
+            min_seconds=cfg.min_segment_seconds,
+            max_seconds=cfg.max_segment_seconds,
+        )
+        self._stream_run = StreamRun()
+
+    def _drop_streaming(self) -> None:
+        self._segmenter = None
+        self._stream_run = None
+
+    def _poll_streaming(self) -> None:
+        """Gibt fertige Abschnitte der laufenden Aufnahme an den Stream-Worker."""
+        run, segmenter = self._stream_run, self._segmenter
+        if run is None or segmenter is None or self.state.current is not State.RECORDING:
+            return
+        new = self.recorder.take_new()
+        if new is None:
+            return
+        for samples in segmenter.feed(new):
+            self._submit_segment(run, samples)
+
+    def _finish_streaming(self, run: StreamRun, segmenter: Segmenter, recording: Recording) -> None:
+        """Beim Stopp: den noch offenen Rest als letzten Abschnitt abschicken."""
+        rest = self.recorder.take_new()
+        if rest is not None:
+            for samples in segmenter.feed(rest):
+                self._submit_segment(run, samples)
+        self._submit_segment(run, segmenter.flush(), final=True, full=recording)
+
+    def _submit_segment(
+        self,
+        run: StreamRun,
+        samples: AudioArray,
+        *,
+        final: bool = False,
+        full: Recording | None = None,
+    ) -> None:
+        recording = None
+        if len(samples) > 0:
+            recording = Recording(samples=samples, sample_rate=self.cfg.audio.sample_rate)
+        job = SegmentJob(run, recording, final=final, full=full)
+        try:
+            self.segments.put(job, timeout=1.0)
+        except queue.Full:
+            log.error("Abschnittswarteschlange voll — Abschnitt verworfen.")
+            run.failed = run.failed or "Still busy — part of the dictation was dropped"
+            if final:
+                self._to_error(run.failed)
+
+    def _stream_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                job = self.segments.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            self._process_segment(job)
+
+    def _process_segment(self, job: SegmentJob) -> None:
+        run = job.run
+        if job.recording is not None:
+            prefix = " " if run.text and not run.text[-1].isspace() else ""
+            try:
+                text = self.pipeline.run(
+                    job.recording, context=run.text[-_CONTEXT_CHARS:], prefix=prefix
+                )
+            except Exception:
+                log.exception("Verarbeitung eines Abschnitts fehlgeschlagen.")
+                run.failed = run.failed or "Transcription failed — see log"
+                if not job.final:
+                    # Die Aufnahme läuft noch: nur melden, den Zustand nicht anfassen.
+                    self.notice = Notice(run.failed)
+            else:
+                if text:
+                    run.text += prefix + text
+        if job.final:
+            self._finish_stream_run(job, run)
+
+    def _finish_stream_run(self, job: SegmentJob, run: StreamRun) -> None:
+        if job.full is not None and not self.cfg.audio.delete_after_use:
+            self._keep_recording(job.full, run.text)
+        if run.failed:
+            self._to_error(run.failed)
+            return
+        if not run.text:
+            self.notice = Notice("No speech detected — nothing inserted", is_error=False)
+        self.state.transition(State.IDLE)
 
     def _check_max_duration(self) -> None:
         if self.state.current is not State.RECORDING:

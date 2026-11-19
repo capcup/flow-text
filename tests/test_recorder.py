@@ -168,3 +168,44 @@ def test_callback_never_blocks_on_a_lock(recorder_and_streams) -> None:
     stream.stop = stop_with_late_callback  # type: ignore[method-assign]
     result = rec.stop()
     assert result is not None  # ohne Deadlock zurückgekehrt
+
+
+def test_take_new_returns_only_unread_samples(recorder_and_streams) -> None:
+    """Für die abschnittsweise Ausgabe: lesen während der Aufnahme, ohne ``stop()`` zu stören."""
+    rec, streams = recorder_and_streams
+    rec.start()
+    assert rec.take_new() is None
+
+    streams[0].feed(8000)
+    streams[0].feed(8000)
+    first = rec.take_new()
+    assert first is not None and len(first) == 16000
+    assert rec.take_new() is None
+
+    streams[0].feed(8000)
+    second = rec.take_new()
+    assert second is not None and len(second) == 8000
+
+    # stop() liefert trotzdem die komplette Aufnahme, nicht nur den Rest.
+    recording = rec.stop()
+    assert recording is not None and len(recording.samples) == 24000
+
+
+def test_take_new_after_stop_returns_the_unread_rest(recorder_and_streams) -> None:
+    rec, streams = recorder_and_streams
+    rec.start()
+    streams[0].feed(8000)
+    rec.take_new()
+    streams[0].feed(8000)
+    rec.stop()
+    rest = rec.take_new()
+    assert rest is not None and len(rest) == 8000
+
+
+def test_a_new_recording_starts_with_nothing_unread(recorder_and_streams) -> None:
+    rec, streams = recorder_and_streams
+    rec.start()
+    streams[0].feed(8000)
+    rec.abort()
+    rec.start()
+    assert rec.take_new() is None

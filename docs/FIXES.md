@@ -116,8 +116,12 @@ not removable bloat. `dist/` is correctly gitignored.
 - **P2** — `tools/bench.py` measures latency and WER on a folder of
   recordings.
 
-Local state after these: `ruff`, `mypy --strict` clean, 368 tests passing.
-P1, Q1 and Q2 were additionally run against the real model on synthesised
-clips with no ffmpeg on `PATH` (numbers in `IMPROVEMENTS.md`). Nothing has
-been checked against real microphone dictations, and B1 and R2 have not been
-tried by hand in the running app.
+- **P4 (partial)** — opt-in `[streaming]`: text is inserted after each pause
+  while recording, so the wait after the stop no longer grows with the
+  length of the dictation.
+
+Local state after these: `ruff`, `mypy --strict` clean, 403 tests passing.
+P1, P4, Q1 and Q2 were additionally run against the real model on
+synthesised clips with no ffmpeg on `PATH` (numbers in `IMPROVEMENTS.md`).
+Nothing has been checked against real microphone dictations, and B1, R2 and
+the streaming option have not been tried by hand in the running app.

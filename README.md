@@ -213,6 +213,9 @@ silence_threshold = 0.005 # Recordings quieter than this are not transcribed (0 
 refiner = "none"          # Standalone default ("none"). Set to "ollama" if desired.
 injector = "clipboard"    # Copies text and performs Cmd+V
 
+[streaming]
+enabled = false           # true = insert text after each pause WHILE you speak (see config.toml)
+
 [cleanup]
 remove_fillers = false    # true = strip "äh", "ähm", "hm" and stutters ("ich ich"). Rule-based, no Ollama needed.
 # extra_fillers = ["sozusagen", "quasi"]   # Words that are always removed as well

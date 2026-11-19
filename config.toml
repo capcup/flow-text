@@ -90,6 +90,19 @@ remove_fillers = false
 # "flow text" = "FlowText"
 # "olammer" = "Ollama"
 
+[streaming]
+# Abschnittsweise Ausgabe: Text wird schon WÄHREND der Aufnahme eingefügt,
+# jeweils nach einer Sprechpause. Danach wartest du nach dem Stopp nur noch
+# auf den letzten Abschnitt (~1 s), egal wie lang das Diktat war.
+#
+# Preis: Was eingefügt ist, lässt sich nicht mehr korrigieren ("Dienstag, nein,
+# Mittwoch" über eine Pause hinweg bleibt stehen), und der Text landet dort,
+# wo gerade der Cursor ist. Bei kurzen Diktaten (unter ~5 s) bringt es nichts.
+enabled = false
+pause_seconds = 0.7          # so lange muss es still sein, bis ein Abschnitt endet
+min_segment_seconds = 2.0    # kürzere Abschnitte werden nicht abgetrennt
+max_segment_seconds = 20.0   # längere werden an der leisesten Stelle getrennt (max. 25)
+
 [feedback]
 sound = true
 

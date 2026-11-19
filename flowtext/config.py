@@ -156,6 +156,27 @@ class CleanupConfig:
 
 
 @dataclass
+class StreamingConfig:
+    """Abschnittsweise Ausgabe: Text erscheint nach jeder Sprechpause."""
+
+    #: ``True`` fügt fertige Abschnitte schon WÄHREND der Aufnahme ein. Was
+    #: eingefügt ist, lässt sich nicht mehr korrigieren ("Dienstag, nein,
+    #: Mittwoch" über eine Pause hinweg bleibt stehen).
+    enabled: bool = False
+
+    #: So lange muss es still sein, bis ein Abschnitt endet.
+    pause_seconds: float = 0.7
+
+    #: Kürzere Abschnitte werden nicht abgetrennt (Ein-Wort-Fetzen erkennt
+    #: Whisper schlecht).
+    min_segment_seconds: float = 2.0
+
+    #: Längere Abschnitte werden an der leisesten Stelle getrennt. Whisper
+    #: sieht höchstens 30 s.
+    max_segment_seconds: float = 20.0
+
+
+@dataclass
 class FeedbackConfig:
     sound: bool = True
     start_sound: str = "/System/Library/Sounds/Tink.aiff"
@@ -178,6 +199,7 @@ class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
+    streaming: StreamingConfig = field(default_factory=StreamingConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -289,6 +311,7 @@ def validate(cfg: Config) -> None:
     extras = cfg.cleanup.extra_fillers
     if not isinstance(extras, list) or not all(isinstance(w, str) for w in extras):
         raise ConfigError("cleanup.extra_fillers muss eine Liste von Wörtern sein")
+    _validate_streaming(cfg.streaming)
     threshold = cfg.pipeline.silence_threshold
     if isinstance(threshold, bool) or not isinstance(threshold, int | float) or threshold < 0:
         raise ConfigError("pipeline.silence_threshold muss eine Zahl >= 0 sein")
@@ -300,6 +323,27 @@ def validate(cfg: Config) -> None:
         isinstance(k, str) and k.strip() and isinstance(v, str) for k, v in replacements.items()
     ):
         raise ConfigError('cleanup.replacements muss eine Tabelle sein: "gehört" = "gewünscht"')
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _validate_streaming(cfg: StreamingConfig) -> None:
+    if not isinstance(cfg.enabled, bool):
+        raise ConfigError("streaming.enabled muss true oder false sein")
+    values = {
+        "pause_seconds": cfg.pause_seconds,
+        "min_segment_seconds": cfg.min_segment_seconds,
+        "max_segment_seconds": cfg.max_segment_seconds,
+    }
+    for name, value in values.items():
+        if not _is_number(value) or value <= 0:
+            raise ConfigError(f"streaming.{name} muss eine Zahl > 0 sein")
+    if cfg.min_segment_seconds >= cfg.max_segment_seconds:
+        raise ConfigError("streaming.min_segment_seconds muss kleiner als max_segment_seconds sein")
+    if cfg.max_segment_seconds > 25:
+        raise ConfigError("streaming.max_segment_seconds darf höchstens 25 sein (Whisper: 30 s)")
 
 
 def conflicts(cfg: Config) -> list[str]:
