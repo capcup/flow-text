@@ -118,7 +118,9 @@ The icon shows you what FlowText is doing at a glance:
 | 🔒 | Permissions missing — use the menu to grant them |
 | ⚠️ | Error — check the log |
 
-Click the icon for: pause/resume, open `config.toml`, open the log file, quit.
+Click the icon for: pause/resume, **Settings…**, the permission shortcuts, the log file, quit.
+
+**Settings…** opens a small window with the switches you change day to day: *Live insertion*, *Remove filler words*, *Play sounds* and the *Vocabulary*. A change applies immediately, without a restart, and is remembered in `~/Library/Application Support/FlowText/preferences.json`. Values you changed there win over `config.toml` (delete the file to go back to `config.toml`); everything else (hotkey, models, thresholds) stays in `config.toml`, which the window's **Open config.toml…** button opens.
 
 ---
 

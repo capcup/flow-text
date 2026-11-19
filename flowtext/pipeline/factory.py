@@ -95,7 +95,8 @@ def _build_injector(cfg: PipelineConfig) -> Injector:
     return ClipboardInjector(paste=cfg.paste, restore_after=cfg.restore_clipboard_after)
 
 
-def _build_cleaner(cfg: PipelineConfig, cleanup: CleanupConfig | None) -> Refiner | None:
+def build_cleaner(cfg: PipelineConfig, cleanup: CleanupConfig | None) -> Refiner | None:
+    """Die regelbasierte Bereinigung — ``None``, wenn nichts davon eingeschaltet ist."""
     if cleanup is None or not (cleanup.remove_fillers or cleanup.replacements):
         return None
 
@@ -115,6 +116,6 @@ def build_pipeline(cfg: PipelineConfig, cleanup: CleanupConfig | None = None) ->
         transcriber=_build_transcriber(cfg),
         refiner=_build_refiner(cfg),
         injector=_build_injector(cfg),
-        cleaner=_build_cleaner(cfg, cleanup),
+        cleaner=build_cleaner(cfg, cleanup),
         guard=SpeechGuard(cfg.silence_threshold),
     )

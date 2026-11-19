@@ -543,3 +543,44 @@ class TestNotices:
         assert menubar.icon_for(State.IDLE, False, False, notice) == menubar.LOCKED_ICON
         assert menubar.icon_for(State.IDLE, True, True, notice) == menubar.PAUSED_ICON
         assert menubar.label_for(State.RECORDING, False, True, notice) == "Recording…"
+
+
+# ------------------------------------------------------------- Settings-Fenster
+
+
+class TestSettingsMenu:
+    def test_settings_replaces_open_configuration(self, menu) -> None:
+        menu.run()
+        titles = [getattr(i, "title", None) for i in menu._ui.menu]
+        assert "Settings…" in titles
+        assert "Open Configuration…" not in titles
+
+    def test_settings_opens_the_window(self, menu, monkeypatch) -> None:
+        shown: list[Any] = []
+
+        class FakeWindow:
+            def __init__(self, app: Any, open_config: Any) -> None:
+                shown.append(("created", app is menu.app))
+                self.open_config = open_config
+
+            def show(self) -> None:
+                shown.append("show")
+
+        module = types.ModuleType("flowtext.settings_window")
+        module.SettingsWindow = FakeWindow  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "flowtext.settings_window", module)
+
+        menu._open_settings(None)
+        menu._open_settings(None)
+        assert shown == [("created", True), "show", "show"]  # ein Fenster, wiederverwendet
+
+    def test_without_the_window_the_config_file_is_the_fallback(
+        self, menu, monkeypatch, caplog
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "flowtext.settings_window", None)  # Import scheitert
+        opened: list[Any] = []
+        monkeypatch.setattr(menu, "_open_config", lambda sender: opened.append(sender))
+        with caplog.at_level("ERROR"):
+            menu._open_settings(None)
+        assert opened == [None]
+        assert "Settings window could not be opened" in caplog.text

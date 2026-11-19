@@ -1,6 +1,11 @@
 # FlowText — Konfiguration
 #
 # Persönliche Overrides gehören in config.local.toml (nicht im Git).
+#
+# Die Schalter im Fenster "Settings…" der Menüleiste (Live-Ausgabe, Füllwörter,
+# Töne, Vokabeln) werden in ~/Library/Application Support/FlowText/
+# preferences.json gespeichert und gewinnen gegen die Werte hier. Datei löschen
+# = es gilt wieder diese config.toml.
 # Alle Werte sind optional; fehlende Schlüssel nutzen die Defaults.
 
 [hotkey]

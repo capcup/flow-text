@@ -152,6 +152,7 @@ class MenubarApp:
         self._ticks = 0
         self._started = False
         self._notified: Notice | None = None
+        self._settings: Any = None
         # Läuft im Controller-Thread: NUR schreiben, kein Cocoa-Zugriff.
         app.state.subscribe(self._remember_state)
 
@@ -209,7 +210,7 @@ class MenubarApp:
             rumps.MenuItem("Grant Accessibility…", callback=self._open_accessibility),
             rumps.MenuItem("Grant Input Monitoring…", callback=self._open_input_monitoring),
             None,
-            rumps.MenuItem("Open Configuration…", callback=self._open_config),
+            rumps.MenuItem("Settings…", callback=self._open_settings),
             rumps.MenuItem("Open Log File…", callback=self._open_log),
             None,
             rumps.MenuItem("Quit FlowText", callback=self._quit),
@@ -272,6 +273,18 @@ class MenubarApp:
 
     def _open_input_monitoring(self, _sender: Any) -> None:
         _open(SETTINGS_URLS["Eingabeüberwachung"])
+
+    def _open_settings(self, _sender: Any) -> None:
+        """Öffnet das Settings-Fenster; ohne AppKit bleibt nur die Datei."""
+        try:
+            if self._settings is None:
+                from .settings_window import SettingsWindow
+
+                self._settings = SettingsWindow(self.app, lambda: self._open_config(None))
+            self._settings.show()
+        except Exception:
+            log.exception("Settings window could not be opened — opening config.toml instead.")
+            self._open_config(None)
 
     def _open_config(self, _sender: Any) -> None:
         path = self.cfg.source if self.cfg.source != "defaults" else None

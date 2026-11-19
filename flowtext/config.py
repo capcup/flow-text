@@ -272,6 +272,14 @@ def load(explicit: Path | None = None) -> Config:
         cfg.source = str(path)
         break
 
+    if explicit is None:
+        # Werte aus dem Settings-Fenster gewinnen gegen config.toml. Mit
+        # explizitem Pfad (Tests, --config) bleibt die Datei allein maßgeblich.
+        from .preferences import Preferences
+
+        if Preferences().apply(cfg):
+            cfg.source += " + preferences.json"
+
     validate(cfg)
     return cfg
 

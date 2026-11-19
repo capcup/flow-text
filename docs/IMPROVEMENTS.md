@@ -74,7 +74,7 @@ clean. About 880 lines of uncommitted work (embedded bundle launcher,
 | R5 | low  | Robustness & privacy | open | osascript Cmd+V needs an undocumented Automation permission |
 | U2 | low  | UX | open | Trigger during PROCESSING is silently dropped |
 | U3 | low  | UX | open | Secure Input silently disables the hotkey |
-| U4 | low  | UX | open | Menu bar lacks reload, re-paste, mic selection, mic permission |
+| U4 | low  | UX | partial (2026-11-10) | Menu bar lacks reload, re-paste, mic selection, mic permission. Settings window (switches) done |
 | D3 | low  | Docs/tooling/git | open | Mixed German/English in logs and UI |
 | D4 | low  | Docs/tooling/git | open | CI: add Python 3.13 and coverage |
 
@@ -521,6 +521,18 @@ word-level Levenshtein distance divided by the number of reference words.
   (Carbon) in the menu bar tick and show it.
 
 **U4 — Menu bar items** · low
+- *Implemented 2026-11-10:* "Open Configuration…" is now **Settings…**, a
+  native AppKit window (`settings_window.py`) with *Live insertion*, *Remove
+  filler words*, *Play sounds* and *Vocabulary*. Changes apply at once
+  (`FlowTextApp.set_option`) and are stored in `preferences.json`
+  (`preferences.py`), which overrides `config.toml` for those four keys only.
+  The window is built from `preferences.OPTIONS`, so a new switch is one
+  entry there. `config.toml` stays one click away (**Open config.toml…**).
+- *Not checked:* the window in the running menu bar app. Built, driven
+  (clicks, text commit, close/reopen) and rendered offscreen to a PNG in a
+  real session; layout checked on that image in dark mode only.
+- *Limits:* `--config <file>` ignores `preferences.json`; the window has no
+  "reset" button; nothing in it for hotkey, models or thresholds.
 - Reload config, re-paste/copy last transcript, input device selection, link
   to the Microphone privacy pane.
 

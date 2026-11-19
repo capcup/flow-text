@@ -120,7 +120,10 @@ not removable bloat. `dist/` is correctly gitignored.
   while recording, so the wait after the stop no longer grows with the
   length of the dictation.
 
-Local state after these: `ruff`, `mypy --strict` clean, 403 tests passing.
+- **U4 (partial)** — the menu's "Open Configuration…" became a **Settings…**
+  window with live-applied switches, stored in `preferences.json`.
+
+Local state after these: `ruff`, `mypy --strict` clean, 439 tests passing.
 P1, P4, Q1 and Q2 were additionally run against the real model on
 synthesised clips with no ffmpeg on `PATH` (numbers in `IMPROVEMENTS.md`).
 Nothing has been checked against real microphone dictations, and B1, R2 and

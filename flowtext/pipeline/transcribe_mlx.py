@@ -79,6 +79,10 @@ class MlxTranscriber:
 
     # ------------------------------------------------------------------ API
 
+    def set_vocabulary(self, vocabulary: Iterable[str]) -> None:
+        """Ändert die Vokabelliste ab dem nächsten Diktat."""
+        self._initial_prompt = vocabulary_prompt(vocabulary)
+
     def warmup(self) -> None:
         """Lädt das Modell, indem einmal Stille transkribiert wird."""
         started = time.perf_counter()

@@ -18,7 +18,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+from . import preferences
 from .audio.recorder import AudioArray, AudioError, AudioRecorder, Recording
 from .audio.segmenter import Segmenter
 from .config import Config, temp_dir
@@ -26,7 +28,7 @@ from .feedback import Feedback
 from .hotkey.detectors import Signal
 from .hotkey.service import HotkeyService
 from .pipeline.base import Pipeline
-from .pipeline.factory import build_pipeline
+from .pipeline.factory import build_cleaner, build_pipeline
 from .pipeline.guard import speech_level
 from .state import State, StateMachine
 
@@ -94,8 +96,10 @@ class FlowTextApp:
         recorder: AudioRecorder | None = None,
         hotkey: HotkeyService | None = None,
         pipeline: Pipeline | None = None,
+        prefs: preferences.Preferences | None = None,
     ) -> None:
         self.cfg = cfg
+        self._prefs = prefs
         self.state = StateMachine()
         self.events: queue.Queue[str] = queue.Queue(maxsize=8)
         self.jobs: queue.Queue[Recording] = queue.Queue(maxsize=4)
@@ -149,10 +153,11 @@ class FlowTextApp:
             threading.Thread(target=self._controller_loop, name="controller", daemon=True),
             threading.Thread(target=self._worker_loop, name="pipeline-worker", daemon=True),
         ]
-        if self.cfg.streaming.enabled:
-            self._threads.append(
-                threading.Thread(target=self._stream_loop, name="stream-worker", daemon=True)
-            )
+        # Immer starten: die Option lässt sich zur Laufzeit einschalten, der
+        # wartende Thread kostet nichts.
+        self._threads.append(
+            threading.Thread(target=self._stream_loop, name="stream-worker", daemon=True)
+        )
         for thread in self._threads:
             thread.start()
         self.hotkey.start()
@@ -187,6 +192,35 @@ class FlowTextApp:
         ``pkill`` scheint nicht zu funktionieren.
         """
         return self._stop.is_set()
+
+    # ----------------------------------------------------------- Einstellungen
+
+    def set_option(self, section: str, key: str, value: Any, *, persist: bool = True) -> None:
+        """Ändert eine Einstellung des Settings-Fensters — wirkt ab dem nächsten Diktat.
+
+        Läuft im Hauptthread (Cocoa). Die betroffenen Stufen werden durch
+        Austausch einer Referenz umgestellt, das ist gegenüber dem Worker-Thread
+        unkritisch: ein laufendes Diktat nutzt noch den alten Stand.
+        """
+        option = preferences.find(section, key)
+        value = preferences.check(option, value)
+        preferences.set_value(self.cfg, option, value)
+
+        if (section, key) == ("cleanup", "remove_fillers"):
+            self.pipeline.cleaner = build_cleaner(self.cfg.pipeline, self.cfg.cleanup)
+        elif (section, key) == ("pipeline", "vocabulary"):
+            apply = getattr(self.pipeline.transcriber, "set_vocabulary", None)
+            if apply is not None:
+                apply(value)
+
+        log.info("Setting %s.%s = %r", section, key, value)
+        if persist:
+            if self._prefs is None:
+                self._prefs = preferences.Preferences()
+            try:
+                self._prefs.save(option, value)
+            except OSError as exc:
+                log.warning("Einstellung konnte nicht gespeichert werden: %s", exc)
 
     # ------------------------------------------------------------------ Pause
 
